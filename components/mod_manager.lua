@@ -697,10 +697,10 @@ gInlineRename = { active = false, text = "" }
 gInlineTags = { active = false, text = "" }
 
 -- Savegame data browser state
-gSavegameBrowser = { show = false, data = {} }
+gSavegameBrowser = { show = false, data = {}, editMode = false, editedData = {}, statusMessage = nil, statusColor = {1, 1, 1}, statusFade = 0 }
 
 -- Batch selection state
-gBatchSelectionMode = false
+
 gSelectedMods = {}
 gShowBatchCollectionPopup = false
 gBatchCollectionScroll = 0
@@ -1971,22 +1971,7 @@ function listMods(list, w, h, issubscribedlist, useSection)
 						end
 					UiPop()
 				end
-				if gBatchSelectionMode then
-					UiPush()
-						UiTranslate(-35, -18)
-						UiButtonImageBox("ui/common/box-outline-4.png", 16, 16, 1, 1, 1, 0.75)
-						UiScale(0.5)
-						if gSelectedMods[id] then
-							if UiImageButton("ui/hud/checkmark.png", 36, 36) then
-								gSelectedMods[id] = nil
-							end
-						else
-							if UiBlankButton(36, 36) then
-								gSelectedMods[id] = true
-							end
-						end
-					UiPop()
-				end
+
 				UiPush()
 					UiTranslate(10, 0)
 					local boldName = subList[i].showbold
@@ -2750,23 +2735,37 @@ function listCollectionMods(mainList, w, h, selected, useSection)
 	return ret, rmb_pushed
 end
 
-function getNodeBytes(keyNode, indentLevel)
-	local totalBytes = 0
-	for _, nextNode in ipairs(ListKeys(keyNode)) do
-		repeat
-			local nextKeyNode = keyNode.."."..nextNode
-			local nextIndent = indentLevel + 1
-			local nodeNameBytes = #nextNode
-			local nodeValueBytes = #GetString(nextKeyNode)
-			if #ListKeys(nextKeyNode) > 0 then
-				totalBytes = totalBytes + getNodeBytes(nextKeyNode, nextIndent)
-				totalBytes = totalBytes + nextIndent*2 + nodeNameBytes*2 + 7 + (nodeValueBytes > 0 and (9+nodeValueBytes) or 0)
-				break
+function getVisibleModIds()
+	local visibleMods = {}
+	
+	if gSearchText ~= "" then
+		-- Search mode: collect from all search result categories
+		for categoryIndex = 1, 3 do
+			for _, mod in ipairs(gSearch.items[categoryIndex]) do
+				table.insert(visibleMods, mod.id)
 			end
-			totalBytes = totalBytes + nextIndent + nodeNameBytes + 4 + (nodeValueBytes > 0 and (9+nodeValueBytes) or 0)
-		until true
+		end
+	else
+		-- Normal mode: collect from current category
+		local currentList = gMods[category.Index]
+		if currentList.sort == 1 then
+			-- Author-sorted mode: iterate through sections
+			for sectionIndex, section in ipairs(currentList.items) do
+				if not currentList.fold[sectionIndex] then
+					for _, mod in ipairs(section) do
+						table.insert(visibleMods, mod.id)
+					end
+				end
+			end
+		else
+			-- Normal sorted mode: direct iteration
+			for _, mod in ipairs(currentList.items) do
+				table.insert(visibleMods, mod.id)
+			end
+		end
 	end
-	return totalBytes
+	
+	return visibleMods
 end
 
 function getSavegameNodeBytes(modNode)
@@ -3164,21 +3163,21 @@ function drawCreate()
 					end
 				UiPop()
 
-				-- Batch selection toggle
+				-- Add all visible mods to collection button
 				UiPush()
 					UiTranslate(0, 32)
-					UiFont("regular.ttf", 20)
+					UiFont("regular.ttf", 18)
 					UiButtonImageBox("ui/common/box-solid-4.png", 4, 4, 1, 1, 1, 0.1)
-					if gBatchSelectionMode then
-						UiColor(0.8, 1, 0.8)
-						if UiTextButton("Exit Batch Select", 160, 28) then
-							gBatchSelectionMode = false
+					UiColor(0.8, 1, 0.8)
+					if UiTextButton("Add all visible to collection", 220, 28) then
+						-- Get all visible mod IDs and show collection selection popup
+						local visibleMods = getVisibleModIds()
+						if #visibleMods > 0 then
 							gSelectedMods = {}
-						end
-					else
-						if UiTextButton("Batch Select", 120, 28) then
-							gBatchSelectionMode = true
-							gSelectedMods = {}
+							for _, modId in ipairs(visibleMods) do
+								gSelectedMods[modId] = true
+							end
+							gShowBatchCollectionPopup = true
 						end
 					end
 				UiPop()
@@ -3588,56 +3587,8 @@ function drawCreate()
 							if UiBlankButton(buttonW, modButtonH) then
 								gSavegameBrowser.show = not gSavegameBrowser.show
 								if gSavegameBrowser.show then
-									-- Populate savegame data with hierarchical structure
-									gSavegameBrowser.data = {}
-									local savegameKeys = ListKeys("savegame.mod."..gModSelected)
-									
-									-- Function to recursively build hierarchical data
-									local function buildHierarchy(keys, prefix)
-										local hierarchy = {}
-										local processed = {}
-										
-										for _, key in ipairs(keys) do
-											if key:find(prefix, 1, true) == 1 then
-												local remaining = key:sub(#prefix + 1)
-												local nextDot = remaining:find("%.")
-												local currentKey = nextDot and remaining:sub(1, nextDot - 1) or remaining
-												local fullCurrentKey = prefix .. currentKey
-												
-												if not processed[currentKey] then
-													processed[currentKey] = true
-													
-													local value = GetString("savegame.mod."..gModSelected.."."..fullCurrentKey)
-													local isTable = false
-													
-													-- Check if this is a table (has sub-keys)
-													for _, checkKey in ipairs(savegameKeys) do
-														if checkKey:find(fullCurrentKey .. ".", 1, true) == 1 then
-															isTable = true
-															break
-														end
-													end
-													
-													local entry = {
-														key = currentKey,
-														value = value,
-														type = isTable and "table" or type(value),
-														depth = select(2, fullCurrentKey:gsub("%.", "")) + 1,
-														bytes = isTable and getSavegameNodeBytes("savegame.mod."..gModSelected.."."..fullCurrentKey) or nil
-													}
-													
-													table.insert(gSavegameBrowser.data, entry)
-													
-													-- Recursively process sub-keys if it's a table
-													if isTable then
-														buildHierarchy(savegameKeys, fullCurrentKey .. ".")
-													end
-												end
-											end
-										end
-									end
-									
-									buildHierarchy(savegameKeys, "")
+									-- Populate savegame data with hierarchical structure and improved type detection
+									refreshSavegameBrowserData()
 								end
 							end
 							UiTranslate(iconLeft-buttonW/2, 0)
@@ -3995,37 +3946,8 @@ function drawCreate()
 						end
 					UiPop()
 
-					-- Batch add to collection button
-					if gBatchSelectionMode and next(gSelectedMods) then
-						UiPush()
-							UiTranslate(0, -2)
-							UiFont("regular.ttf", 18)
-							UiButtonImageBox("ui/common/box-solid-4.png", 4, 4, 1, 1, 1, 0.1)
-							UiColor(0.8, 1, 0.8)
-							local selectedCount = 0
-							for _ in pairs(gSelectedMods) do selectedCount = selectedCount + 1 end
-							if UiTextButton(locLang.batchAddToCollection, 220, 28) then
-								-- Show collection selection popup
-								gShowBatchCollectionPopup = true
-							end
-						UiPop()
-					end
 
-					UiTranslate(0, 2)
-					-- Batch selection toggle
-					UiPush()
-						UiTranslate(0, 5)
-						local buttonText = gBatchSelectionMode and locLang.exitBatchSelect or locLang.batchSelect
-						local buttonColor = gBatchSelectionMode and {0.8, 0.6, 0.6} or {0.6, 0.8, 0.6}
-						UiButtonImageBox("ui/common/box-solid-4.png", 4, 4, 1, 1, 1, 0.1)
-						UiColor(unpack(buttonColor))
-						if UiTextButton(buttonText, 140, 28) then
-							gBatchSelectionMode = not gBatchSelectionMode
-							if not gBatchSelectionMode then
-								gSelectedMods = {}
-							end
-						end
-					UiPop()
+
 					UiTranslate(0, 2)
 					-- filter
 					local needUpdate = false
@@ -4052,6 +3974,144 @@ function drawCreate()
 		UiPop()
 	UiPop()
 	return open
+end
+
+function saveEditedSavegameData()
+	if not gModSelected or gModSelected == "" then return end
+	
+	local saveCount = 0
+	local errorCount = 0
+	
+	for i, entry in ipairs(gSavegameBrowser.data) do
+		if entry.type ~= "table" and gSavegameBrowser.editedData[i] then
+			local newValue = gSavegameBrowser.editedData[i]
+			local keyPath = "savegame.mod." .. gModSelected .. "." .. getFullKeyPath(entry)
+			
+			-- Try to determine the appropriate data type and save
+			local success = false
+			if entry.type == "number" then
+				local numValue = tonumber(newValue)
+				if numValue then
+					SetFloat(keyPath, numValue)
+					success = true
+				end
+			elseif entry.type == "boolean" then
+				local boolValue = newValue:lower()
+				if boolValue == "true" or boolValue == "1" then
+					SetBool(keyPath, true)
+					success = true
+				elseif boolValue == "false" or boolValue == "0" then
+					SetBool(keyPath, false)
+					success = true
+				end
+			else -- string or unknown type
+				SetString(keyPath, newValue)
+				success = true
+			end
+			
+			if success then
+				saveCount = saveCount + 1
+			else
+				errorCount = errorCount + 1
+				print("Failed to save value for key: " .. keyPath .. " (invalid type conversion)")
+			end
+		end
+	end
+	
+	-- Set status message
+	if errorCount == 0 then
+		gSavegameBrowser.statusMessage = "Saved " .. saveCount .. " value(s) successfully"
+		gSavegameBrowser.statusColor = {0.2, 0.8, 0.2} -- Green
+	else
+		gSavegameBrowser.statusMessage = "Saved " .. saveCount .. " value(s), " .. errorCount .. " failed"
+		gSavegameBrowser.statusColor = {0.8, 0.2, 0.2} -- Red
+	end
+	
+	-- Clear status after 3 seconds
+	SetValueInTable(gSavegameBrowser, "statusFade", 1, "linear", 3)
+	
+	-- Refresh the data display
+	refreshSavegameBrowserData()
+end
+
+function refreshSavegameBrowserData()
+	if not gModSelected or gModSelected == "" then return end
+	
+	local savegameKeys = ListKeys("savegame.mod."..gModSelected)
+	gSavegameBrowser.data = {}
+	local function buildHierarchy(keys, prefix)
+		local hierarchy = {}
+		local processed = {}
+		
+		for _, key in ipairs(keys) do
+			if key:find(prefix, 1, true) == 1 then
+				local remaining = key:sub(#prefix + 1)
+				local nextDot = remaining:find("%.") or (#remaining + 1)
+				local currentKey = remaining:sub(1, nextDot - 1)
+				local fullCurrentKey = prefix .. currentKey
+				
+				if not processed[currentKey] then
+					processed[currentKey] = true
+					
+					local value = GetString("savegame.mod."..gModSelected.."."..fullCurrentKey)
+					local isTable = false
+					
+					for _, checkKey in ipairs(savegameKeys) do
+						if checkKey:find(fullCurrentKey .. ".", 1, true) == 1 then
+							isTable = true
+							break
+						end
+					end
+					
+					-- Better type detection
+					local detectedType = "string"
+					if not isTable then
+						if value == "true" or value == "false" then
+							detectedType = "boolean"
+						elseif tonumber(value) and tostring(tonumber(value)) == value then
+							detectedType = "number"
+						end
+					else
+						detectedType = "table"
+					end
+					
+					local entry = {
+						key = currentKey,
+						value = value,
+						type = detectedType,
+						depth = select(2, fullCurrentKey:gsub("%.", "")) + 1,
+						bytes = isTable and getSavegameNodeBytes("savegame.mod."..gModSelected.."."..fullCurrentKey) or nil
+					}
+					
+					table.insert(gSavegameBrowser.data, entry)
+					
+					if isTable then
+						buildHierarchy(savegameKeys, fullCurrentKey .. ".")
+					end
+				end
+			end
+		end
+	end
+	
+	buildHierarchy(savegameKeys, "")
+end
+
+function getFullKeyPath(entry)
+	-- Reconstruct the full key path from the hierarchical data
+	local path = entry.key
+	local currentDepth = entry.depth - 1
+	
+	-- Find parent entries to build the full path
+	for i = #gSavegameBrowser.data, 1, -1 do
+		local parentEntry = gSavegameBrowser.data[i]
+		if parentEntry.depth < currentDepth and parentEntry.type == "table" then
+			path = parentEntry.key .. "." .. path
+			currentDepth = parentEntry.depth
+			if currentDepth <= 1 then break end
+		end
+	end
+	
+	return path
 end
 
 function drawSavegameBrowser()
@@ -4082,6 +4142,18 @@ function drawSavegameBrowser()
 			UiText(locLang.savegameBrowser)
 		UiPop()
 		
+		-- Status message
+		if gSavegameBrowser.statusMessage and (gSavegameBrowser.statusFade or 0) > 0.05 then
+			UiPush()
+				UiFont("regular.ttf", 20)
+				UiAlign("center")
+				UiTranslate(UiCenter(), 50)
+				UiColor(unpack(gSavegameBrowser.statusColor or {1, 1, 1}))
+				UiColor(1, 1, 1, gSavegameBrowser.statusFade or 1)
+				UiText(gSavegameBrowser.statusMessage)
+			UiPop()
+		end
+		
 		-- Close button
 		UiPush()
 			UiAlign("top right")
@@ -4089,6 +4161,33 @@ function drawSavegameBrowser()
 			UiFont("regular.ttf", 24)
 			if UiTextButton("×", 30, 30) then
 				gSavegameBrowser.show = false
+			end
+		UiPop()
+		
+		-- Edit mode toggle button
+		UiPush()
+			UiAlign("top right")
+			UiTranslate(w - 80, 10)
+			UiFont("regular.ttf", 20)
+			local buttonText = gSavegameBrowser.editMode and "Save" or "Edit"
+			local buttonColor = gSavegameBrowser.editMode and {0.2, 0.8, 0.2} or {0.8, 0.8, 0.8}
+			UiColor(unpack(buttonColor))
+			if UiTextButton(buttonText, 60, 30) then
+				if gSavegameBrowser.editMode then
+					-- Save changes
+					saveEditedSavegameData()
+					gSavegameBrowser.editMode = false
+				else
+					-- Enter edit mode
+					gSavegameBrowser.editMode = true
+					-- Initialize edited data with current values
+					gSavegameBrowser.editedData = {}
+					for i, entry in ipairs(gSavegameBrowser.data) do
+						if entry.type ~= "table" then
+							gSavegameBrowser.editedData[i] = tostring(entry.value)
+						end
+					end
+				end
 			end
 		UiPop()
 		
@@ -4146,13 +4245,30 @@ function drawSavegameBrowser()
 						
 						-- Value (if not a table)
 						if entry.type ~= "table" then
-							local valueText = tostring(entry.value)
-							if entry.bytes then
-								valueText = valueText .. " (" .. truncateBytesUnits(entry.bytes) .. ")"
+							local valueText
+							if gSavegameBrowser.editMode then
+								-- Show input field in edit mode
+								local currentValue = gSavegameBrowser.editedData[i] or tostring(entry.value)
+								local inputWidth = 200
+								UiTranslate(UiMeasureText(0, keyText) + 10, 0)
+								UiColor(0.2, 0.2, 0.2, 0.8)
+								UiRect(inputWidth, 20)
+								UiColor(1, 1, 1)
+								local newValue, changed = UiTextInput(currentValue, inputWidth, 20, true)
+								if changed then
+									gSavegameBrowser.editedData[i] = newValue
+								end
+								valueText = ""
+							else
+								-- Show display text in view mode
+								valueText = tostring(entry.value)
+								if entry.bytes then
+									valueText = valueText .. " (" .. truncateBytesUnits(entry.bytes) .. ")"
+								end
+								UiTranslate(UiMeasureText(0, keyText) + 10, 0)
+								UiColor(1, 1, 1)
+								UiText(valueText)
 							end
-							UiTranslate(UiMeasureText(0, keyText) + 10, 0)
-							UiColor(1, 1, 1)
-							UiText(valueText)
 						end
 						
 						y = y + lineHeight
@@ -4264,7 +4380,6 @@ function drawBatchCollectionPopup()
 								handleModCollect(modId, key)
 							end
 							gShowBatchCollectionPopup = false
-							gBatchSelectionMode = false
 							gSelectedMods = {}
 							break
 						end
