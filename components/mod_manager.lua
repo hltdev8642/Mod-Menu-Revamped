@@ -41,11 +41,6 @@ function locLangReset()
 	locLang.close =                   "Close"
 	locLang.sizeUnit =                "KB"
 	locLang.filterApplied =           "Filter Applied"
-	locLang.openFolders =             "Open Roots"
-	locLang.openBuiltIn =             "Open Built-in"
-	locLang.openWorkshop =            "Open Workshop"
-	locLang.openLocal =               "Open Local"
-	locLang.savegameOpen =            "View Save Data"
 	locLang.rename = 					"Rename"
 	locLang.duplicate = 				"Duplicate"
 	locLang.delete = 					"Delete"
@@ -696,7 +691,6 @@ gShowScanPopup = false
 -- Savegame data browser state
 gShowSavegameBrowser = false
 gSavegameBrowserScroll = 0
-gSavegameBrowserFold = {}
 
 -- Inline rename / tag edit state
 gInlineRename = { active = false, text = "" }
@@ -824,41 +818,6 @@ function yesNoPop()
 
 			if UiTextButton("loc@UI_BUTTON_YES", buttonW, 40) then
 				yesNoPopPopup.yes = true
-					-- open root folders & savegame data
-					UiTranslate(-30, 0)
-					UiPush()
-						UiButtonHoverColor(0.75,0.75,1)
-						UiButtonPressColor(0.45,0.45,0.95)
-						UiScale(0.32)
-						if UiIsMouseInRect(64,64) then
-							tooltipHoverId = "openCategoryRoots"
-							local mx,my = UiGetMousePos()
-							tooltip = {x = mx, y = my, text = locLang.openFolders, mode = 1, bold=false}
-						end
-						if UiImageButton("ui/components/mod_manager_img/external-link.png") then
-							-- Try open each category root if known
-							local builtIn = GetString("mods.path.builtin")
-							local workshop = GetString("mods.path.workshop")
-							local localp = GetString("mods.path.local")
-							if builtIn ~= "" then Command("game.openfolder", builtIn) end
-							if workshop ~= "" then Command("game.openfolder", workshop) end
-							if localp ~= "" then Command("game.openfolder", localp) end
-						end
-					UiPop()
-					UiTranslate(-30, 0)
-					UiPush()
-						UiButtonHoverColor(1,0.75,0.75)
-						UiButtonPressColor(0.95,0.45,0.45)
-						UiScale(0.32)
-						if UiIsMouseInRect(64,64) then
-							tooltipHoverId = "savegameBrowser"
-							local mx,my = UiGetMousePos()
-							tooltip = {x = mx, y = my, text = locLang.savegameBrowser, mode = 1, bold=false}
-						end
-						if UiImageButton("ui/components/mod_manager_img/circle-info-solid.png") then
-							if gModSelected ~= "" then gShowSavegameBrowser = true end
-						end
-					UiPop()
 				clicked = true
 			end
 
@@ -1475,14 +1434,31 @@ function updateSearch()
 		gSearchDirty = false
 	end
 
+	-- For immediate simple search: extract text if no advanced tokens
+	local immediateText = ""
+	if gSearchText ~= "" then
+		local hasAdvanced = false
+		for token in gSearchText:gmatch("%S+") do
+			local lower = token:lower()
+			if lower:match("^(author):") or lower:match("^(tag):") or lower:match("^(size):") or lower:match("^(updated):") or lower == "-active" or lower == "active" or lower == "has:preview" or lower == "no:preview" then
+				hasAdvanced = true
+				break
+			end
+		end
+		if not hasAdvanced then
+			immediateText = gSearchText:match("^%s*(.-)%s*$")
+		end
+	end
+
 	local mods = ListKeys("mods.available")
 	for i=1,#mods do
 		local mod = {}
 		local modNode = mods[i]
 		local modName = GetString("mods.available."..modNode..".listname")
 		local simpleMatch = true
-		if gSearchAdvanced.parsed.text ~= "" then
-			simpleMatch = modName:lower():match(gSearchAdvanced.parsed.text)
+		local searchText = immediateText ~= "" and immediateText or gSearchAdvanced.parsed.text
+		if searchText ~= "" then
+			simpleMatch = modName:lower():match(searchText:lower())
 		end
 		mod.id = modNode
 		mod.name = modName
@@ -4262,91 +4238,6 @@ function drawPopElements()
 	end
 end
 
--- ================= Savegame Data Browser =================
-local function listSavegameNodes(modId)
-	local base = "savegame.mod."..modId
-	if not HasKey(base) then return {} end
-	local out = {}
-	local function recur(node, depth)
-		for _, k in ipairs(ListKeys(node)) do
-			local full = node.."."..k
-			local children = ListKeys(full)
-			local hasChildren = #children > 0
-			out[#out+1] = { path = full, key = k, depth = depth, hasChildren = hasChildren, value = (not hasChildren) and GetString(full) or "" }
-			if hasChildren and not gSavegameBrowserFold[full] then recur(full, depth+1) end
-		end
-	end
-	recur(base, 0)
-	return out
-end
-
-local function drawSavegameBrowser(show)
-	if not show then return end
-	UiModalBegin()
-	UiPush()
-		local w, h = 1000, 700
-		UiTranslate(UiCenter()-w/2, UiMiddle()-h/2)
-		UiColor(0,0,0,0.5)
-		UiImageBox("ui/common/box-solid-shadow-50.png", w, h, -50, -50)
-		UiWindow(w, h)
-		UiAlign("left top")
-		UiColor(1,1,1)
-		UiFont("bold.ttf", 32)
-		UiTranslate(24, 20)
-		UiText(locLang.savegameBrowser)
-		UiFont("regular.ttf", 20)
-		UiTranslate(0, 8)
-		UiColor(0.8,0.8,0.8)
-		UiText("Mod: "..gModSelected)
-		UiTranslate(0, 16)
-		local list = listSavegameNodes(gModSelected)
-		local viewH = h-140
-		UiPush()
-			UiWindow(w-48, viewH, true)
-			local lineH = 22
-			local totalLines = #list
-			local visible = math.floor(viewH/lineH)
-			local scrollMax = math.max(0, totalLines-visible)
-			local wheel = InputValue("mousewheel")
-			if wheel ~= 0 and UiIsMouseInRect(w-48, viewH) then gSavegameBrowserScroll = clamp(gSavegameBrowserScroll - wheel*3, 0, scrollMax) end
-			local startIdx = math.floor(gSavegameBrowserScroll)+1
-			local endIdx = math.min(totalLines, startIdx+visible+1)
-			for i=startIdx,endIdx do
-				local entry = list[i]
-				UiPush()
-					UiTranslate(entry.depth*18, 0)
-					UiColor(1,1,1,0.9)
-					local label = entry.key
-					if entry.hasChildren then
-						local sign = gSavegameBrowserFold[entry.path] and "+" or "-"
-						UiPush()
-							UiFont("bold.ttf", 20)
-							if UiIsMouseInRect(22, lineH) and InputPressed("lmb") then
-								gSavegameBrowserFold[entry.path] = not gSavegameBrowserFold[entry.path]
-							end
-							UiText(sign)
-						UiPop()
-						UiTranslate(24,0)
-					end
-					UiText(label)
-					if entry.value ~= "" then
-						UiTranslate(300-entry.depth*18,0)
-						UiColor(0.7,0.9,0.7)
-						local val = entry.value
-						if #val > 40 then val = val:sub(1,37).."..." end
-						UiText(val)
-					end
-				UiPop()
-				UiTranslate(0, lineH)
-			end
-		UiPop()
-		UiTranslate(0, viewH+20)
-		UiButtonImageBox("ui/common/box-outline-6.png",6,6,1,1,1,0.7)
-		if UiTextButton(locLang.close, 140, 40) or InputPressed("esc") then gShowSavegameBrowser = false end
-	UiPop()
-	UiModalEnd()
-end
-
 function setWindowSize()
 	local screenSize = GetScreenSize()
 	if screenSize.w/16 > screenSize.h/9 then
@@ -4393,7 +4284,6 @@ ModManager.Window = Ui.Window
 			drawPopElements()
 			drawLargePreview(gLargePreview > 0)
 			menuOpen = drawPublish(gPublishScale > 0) or menuOpen
-			drawSavegameBrowser(gShowSavegameBrowser)
 			if not menuOpen then self:hide() end
 			UiModalEnd()
 		UiPop()
