@@ -696,6 +696,15 @@ gSavegameBrowserScroll = 0
 gInlineRename = { active = false, text = "" }
 gInlineTags = { active = false, text = "" }
 
+-- Savegame data browser state
+gSavegameBrowser = { show = false, data = {} }
+
+-- Batch selection state
+gBatchSelectionMode = false
+gSelectedMods = {}
+gShowBatchCollectionPopup = false
+gBatchCollectionScroll = 0
+
 -- Backup payload node
 gBackupNode = nodes.Settings..".backupPayload"
 
@@ -1962,6 +1971,22 @@ function listMods(list, w, h, issubscribedlist, useSection)
 						end
 					UiPop()
 				end
+				if gBatchSelectionMode then
+					UiPush()
+						UiTranslate(-35, -18)
+						UiButtonImageBox("ui/common/box-outline-4.png", 16, 16, 1, 1, 1, 0.75)
+						UiScale(0.5)
+						if gSelectedMods[id] then
+							if UiImageButton("ui/hud/checkmark.png", 36, 36) then
+								gSelectedMods[id] = nil
+							end
+						else
+							if UiBlankButton(36, 36) then
+								gSelectedMods[id] = true
+							end
+						end
+					UiPop()
+				end
 				UiPush()
 					UiTranslate(10, 0)
 					local boldName = subList[i].showbold
@@ -3138,6 +3163,25 @@ function drawCreate()
 						if needUpdate then updateSearch() end
 					end
 				UiPop()
+
+				-- Batch selection toggle
+				UiPush()
+					UiTranslate(0, 32)
+					UiFont("regular.ttf", 20)
+					UiButtonImageBox("ui/common/box-solid-4.png", 4, 4, 1, 1, 1, 0.1)
+					if gBatchSelectionMode then
+						UiColor(0.8, 1, 0.8)
+						if UiTextButton("Exit Batch Select", 160, 28) then
+							gBatchSelectionMode = false
+							gSelectedMods = {}
+						end
+					else
+						if UiTextButton("Batch Select", 120, 28) then
+							gBatchSelectionMode = true
+							gSelectedMods = {}
+						end
+					end
+				UiPop()
 				local h = category.Index == 2 and listH-44 or listH
 				local selected, rmb_pushed, searchCategory
 
@@ -3537,6 +3581,74 @@ function drawCreate()
 								UiText("loc@UI_TEXT_DETAILS")
 							UiPop()
 						end
+						-- Savegame browser button
+						UiTranslate(0, modButtonT)
+						UiPush()
+							if UiIsMouseInRect(buttonW, modButtonH) then UiColorFilter(1, 1, 0.35) end
+							if UiBlankButton(buttonW, modButtonH) then
+								gSavegameBrowser.show = not gSavegameBrowser.show
+								if gSavegameBrowser.show then
+									-- Populate savegame data with hierarchical structure
+									gSavegameBrowser.data = {}
+									local savegameKeys = ListKeys("savegame.mod."..gModSelected)
+									
+									-- Function to recursively build hierarchical data
+									local function buildHierarchy(keys, prefix)
+										local hierarchy = {}
+										local processed = {}
+										
+										for _, key in ipairs(keys) do
+											if key:find(prefix, 1, true) == 1 then
+												local remaining = key:sub(#prefix + 1)
+												local nextDot = remaining:find("%.")
+												local currentKey = nextDot and remaining:sub(1, nextDot - 1) or remaining
+												local fullCurrentKey = prefix .. currentKey
+												
+												if not processed[currentKey] then
+													processed[currentKey] = true
+													
+													local value = GetString("savegame.mod."..gModSelected.."."..fullCurrentKey)
+													local isTable = false
+													
+													-- Check if this is a table (has sub-keys)
+													for _, checkKey in ipairs(savegameKeys) do
+														if checkKey:find(fullCurrentKey .. ".", 1, true) == 1 then
+															isTable = true
+															break
+														end
+													end
+													
+													local entry = {
+														key = currentKey,
+														value = value,
+														type = isTable and "table" or type(value),
+														depth = select(2, fullCurrentKey:gsub("%.", "")) + 1,
+														bytes = isTable and getSavegameNodeBytes("savegame.mod."..gModSelected.."."..fullCurrentKey) or nil
+													}
+													
+													table.insert(gSavegameBrowser.data, entry)
+													
+													-- Recursively process sub-keys if it's a table
+													if isTable then
+														buildHierarchy(savegameKeys, fullCurrentKey .. ".")
+													end
+												end
+											end
+										end
+									end
+									
+									buildHierarchy(savegameKeys, "")
+								end
+							end
+							UiTranslate(iconLeft-buttonW/2, 0)
+							UiPush()
+								UiScale(0.34375)
+								UiImage("ui/components/mod_manager_img/database-solid.png")
+							UiPop()
+							UiTranslate(iconGap, EAcharOffset)
+							UiAlign("left middle")
+							UiText(locLang.savegameBrowser)
+						UiPop()
 					UiPop()
 
 					-- play/enable, options, character
@@ -3654,6 +3766,20 @@ function drawCreate()
 								end
 							UiPop()
 						end
+						-- Open folder button
+						UiTranslate(0, -modButtonT)
+						UiPush()
+							if UiIsMouseInRect(buttonW, modButtonH) then UiColorFilter(1, 1, 0.35) end
+							if UiBlankButton(buttonW, modButtonH) then Command("game.openfolder", modPath) end
+							UiTranslate(iconLeft-buttonW/2, 0)
+							UiPush()
+								UiScale(0.34375)
+								UiImage("ui/components/mod_manager_img/folder-open-solid.png")
+							UiPop()
+							UiTranslate(iconGap, EAcharOffset)
+							UiAlign("left middle")
+							UiText(locLang.openFolder)
+						UiPop()
 					UiPop()
 
 					-- path
@@ -3869,6 +3995,37 @@ function drawCreate()
 						end
 					UiPop()
 
+					-- Batch add to collection button
+					if gBatchSelectionMode and next(gSelectedMods) then
+						UiPush()
+							UiTranslate(0, -2)
+							UiFont("regular.ttf", 18)
+							UiButtonImageBox("ui/common/box-solid-4.png", 4, 4, 1, 1, 1, 0.1)
+							UiColor(0.8, 1, 0.8)
+							local selectedCount = 0
+							for _ in pairs(gSelectedMods) do selectedCount = selectedCount + 1 end
+							if UiTextButton(locLang.batchAddToCollection, 220, 28) then
+								-- Show collection selection popup
+								gShowBatchCollectionPopup = true
+							end
+						UiPop()
+					end
+
+					UiTranslate(0, 2)
+					-- Batch selection toggle
+					UiPush()
+						UiTranslate(0, 5)
+						local buttonText = gBatchSelectionMode and locLang.exitBatchSelect or locLang.batchSelect
+						local buttonColor = gBatchSelectionMode and {0.8, 0.6, 0.6} or {0.6, 0.8, 0.6}
+						UiButtonImageBox("ui/common/box-solid-4.png", 4, 4, 1, 1, 1, 0.1)
+						UiColor(unpack(buttonColor))
+						if UiTextButton(buttonText, 140, 28) then
+							gBatchSelectionMode = not gBatchSelectionMode
+							if not gBatchSelectionMode then
+								gSelectedMods = {}
+							end
+						end
+					UiPop()
 					UiTranslate(0, 2)
 					-- filter
 					local needUpdate = false
@@ -3895,6 +4052,255 @@ function drawCreate()
 		UiPop()
 	UiPop()
 	return open
+end
+
+function drawSavegameBrowser()
+	if not gSavegameBrowser.show then return end
+	
+	UiModalBegin()
+	UiBlur(1)
+	UiPush()
+		local w, h = 800, 600
+		UiTranslate(UiCenter(), UiMiddle())
+		UiColor(0, 0, 0, 0.5)
+		UiAlign("center middle")
+		UiImageBox("ui/common/box-solid-shadow-50.png", w, h, -50, -50)
+		UiWindow(w, h)
+		UiAlign("left top")
+		UiColor(1, 1, 1)
+		
+		-- Close on ESC or outside click
+		if InputPressed("esc") or (not UiIsMouseInRect(UiWidth(), UiHeight()) and InputPressed("lmb")) then
+			gSavegameBrowser.show = false
+		end
+		
+		-- Title
+		UiPush()
+			UiFont("bold.ttf", 32)
+			UiAlign("center")
+			UiTranslate(UiCenter(), 20)
+			UiText(locLang.savegameBrowser)
+		UiPop()
+		
+		-- Close button
+		UiPush()
+			UiAlign("top right")
+			UiTranslate(w - 40, 10)
+			UiFont("regular.ttf", 24)
+			if UiTextButton("×", 30, 30) then
+				gSavegameBrowser.show = false
+			end
+		UiPop()
+		
+		-- Content area
+		UiPush()
+			UiTranslate(20, 60)
+			local contentW, contentH = w - 40, h - 80
+			
+			-- Scrollable area for savegame data
+			if not gSavegameBrowser.scrollY then gSavegameBrowser.scrollY = 0 end
+			
+			-- Handle scrolling
+			local scrollSpeed = 20
+			if UiIsMouseInRect(contentW, contentH) then
+				local scroll = InputValue("mousewheel")
+				if scroll ~= 0 then
+					gSavegameBrowser.scrollY = gSavegameBrowser.scrollY - scroll * scrollSpeed
+				end
+			end
+			
+			UiWindow(contentW, contentH, true)
+			UiAlign("left top")
+			UiFont("regular.ttf", 18)
+			
+			if #gSavegameBrowser.data == 0 then
+				UiColor(0.7, 0.7, 0.7)
+				UiText("No savegame data found for this mod.")
+			else
+				local lineHeight = 24
+				local totalHeight = #gSavegameBrowser.data * lineHeight
+				gSavegameBrowser.scrollY = math.max(0, math.min(gSavegameBrowser.scrollY, totalHeight - contentH))
+				
+				local startY = gSavegameBrowser.scrollY
+				local y = -startY
+				local maxLines = math.ceil(contentH / lineHeight) + 1
+				local startIndex = math.max(1, math.floor(startY / lineHeight) + 1)
+				local endIndex = math.min(#gSavegameBrowser.data, startIndex + maxLines - 1)
+				
+				for i = startIndex, endIndex do
+					local entry = gSavegameBrowser.data[i]
+					UiPush()
+						UiTranslate(0, y)
+						
+						-- Indentation based on depth
+						local indent = entry.depth * 20
+						UiTranslate(indent, 0)
+						
+						-- Key
+						UiColor(0.9, 0.9, 1)
+						local keyText = entry.key
+						if entry.type == "table" then
+							keyText = keyText .. " {"
+						end
+						UiText(keyText)
+						
+						-- Value (if not a table)
+						if entry.type ~= "table" then
+							local valueText = tostring(entry.value)
+							if entry.bytes then
+								valueText = valueText .. " (" .. truncateBytesUnits(entry.bytes) .. ")"
+							end
+							UiTranslate(UiMeasureText(0, keyText) + 10, 0)
+							UiColor(1, 1, 1)
+							UiText(valueText)
+						end
+						
+						y = y + lineHeight
+					UiPop()
+				end
+				
+				-- Add scrollbar if needed
+				if totalHeight > contentH then
+					local scrollbarWidth = 12
+					local scrollbarHeight = contentH * (contentH / totalHeight)
+					local scrollbarY = (gSavegameBrowser.scrollY / (totalHeight - contentH)) * (contentH - scrollbarHeight)
+					
+					UiPush()
+						UiTranslate(contentW - scrollbarWidth - 2, 0)
+						UiColor(0.2, 0.2, 0.2, 0.8)
+						UiRect(scrollbarWidth, contentH)
+						UiColor(0.5, 0.5, 0.5, 1)
+						UiTranslate(0, scrollbarY)
+						UiRect(scrollbarWidth, scrollbarHeight)
+					UiPop()
+				end
+			end
+		UiPop()
+		
+	UiPop()
+	UiModalEnd()
+end
+
+function drawBatchCollectionPopup()
+	if not gShowBatchCollectionPopup then return end
+	
+	UiModalBegin()
+	UiBlur(1)
+	UiPush()
+		local w, h = 600, 400
+		UiTranslate(UiCenter(), UiMiddle())
+		UiColor(0, 0, 0, 0.5)
+		UiAlign("center middle")
+		UiImageBox("ui/common/box-solid-shadow-50.png", w, h, -50, -50)
+		UiWindow(w, h)
+		UiAlign("left top")
+		UiColor(1, 1, 1)
+		
+		-- Close on ESC or outside click
+		if InputPressed("esc") or (not UiIsMouseInRect(UiWidth(), UiHeight()) and InputPressed("lmb")) then
+			gShowBatchCollectionPopup = false
+		end
+		
+		-- Title
+		UiPush()
+			UiFont("bold.ttf", 28)
+			UiAlign("center")
+			UiTranslate(UiCenter(), 20)
+			local selectedCount = 0
+			for _ in pairs(gSelectedMods) do selectedCount = selectedCount + 1 end
+			UiText("Add " .. selectedCount .. " mods to collection")
+		UiPop()
+		
+		-- Close button
+		UiPush()
+			UiAlign("top right")
+			UiTranslate(w - 40, 10)
+			UiFont("regular.ttf", 24)
+			if UiTextButton("×", 30, 30) then
+				gShowBatchCollectionPopup = false
+			end
+		UiPop()
+		
+		-- Content area
+		UiPush()
+			UiTranslate(20, 60)
+			local contentW, contentH = w - 40, h - 120
+			
+			UiFont("regular.ttf", 20)
+			UiText(locLang.selectCollection)
+			UiTranslate(0, 30)
+			
+			-- List collections
+			local collectionKeys = {}
+			for key in pairs(gCollections) do
+				table.insert(collectionKeys, key)
+			end
+			table.sort(collectionKeys)
+			
+			local buttonHeight = 35
+			local maxVisible = math.floor(contentH / buttonHeight)
+			if not gBatchCollectionScroll then gBatchCollectionScroll = 0 end
+			
+			-- Handle scrolling
+			if UiIsMouseInRect(contentW, contentH) then
+				local scroll = InputValue("mousewheel")
+				if scroll ~= 0 then
+					gBatchCollectionScroll = math.max(0, math.min(gBatchCollectionScroll - scroll * 2, #collectionKeys - maxVisible))
+				end
+			end
+			
+			UiWindow(contentW, contentH, true)
+			
+			for i = 1, #collectionKeys do
+				local key = collectionKeys[i]
+				local collection = gCollections[key]
+				if i > gBatchCollectionScroll and i <= gBatchCollectionScroll + maxVisible then
+					UiPush()
+						UiTranslate(0, (i - gBatchCollectionScroll - 1) * buttonHeight)
+						UiButtonImageBox("ui/common/box-outline-4.png", 4, 4, 0.8, 0.8, 0.8, 0.1)
+						if UiTextButton(collection.name, contentW - 20, buttonHeight - 5) then
+							-- Add selected mods to this collection
+							for modId in pairs(gSelectedMods) do
+								handleModCollect(modId, key)
+							end
+							gShowBatchCollectionPopup = false
+							gBatchSelectionMode = false
+							gSelectedMods = {}
+							break
+						end
+					UiPop()
+				end
+			end
+			
+			-- Scrollbar if needed
+			if #collectionKeys > maxVisible then
+				local scrollbarWidth = 12
+				local scrollbarHeight = contentH * (maxVisible / #collectionKeys)
+				local scrollbarY = (gBatchCollectionScroll / (#collectionKeys - maxVisible)) * (contentH - scrollbarHeight)
+				
+				UiPush()
+					UiTranslate(contentW - scrollbarWidth - 2, 0)
+					UiColor(0.2, 0.2, 0.2, 0.8)
+					UiRect(scrollbarWidth, contentH)
+					UiColor(0.5, 0.5, 0.5, 1)
+					UiTranslate(0, scrollbarY)
+					UiRect(scrollbarWidth, scrollbarHeight)
+				UiPop()
+			end
+		UiPop()
+		
+		-- Cancel button
+		UiPush()
+			UiAlign("bottom center")
+			UiTranslate(UiCenter(), h - 50)
+			UiFont("regular.ttf", 20)
+			if UiTextButton(locLang.cancel, 100, 30) then
+				gShowBatchCollectionPopup = false
+			end
+		UiPop()
+		
+	UiPop()
+	UiModalEnd()
 end
 
 function drawLargePreview(show)
@@ -4283,6 +4689,8 @@ ModManager.Window = Ui.Window
 			menuOpen = drawCreate()
 			drawPopElements()
 			drawLargePreview(gLargePreview > 0)
+			drawSavegameBrowser()
+			drawBatchCollectionPopup()
 			menuOpen = drawPublish(gPublishScale > 0) or menuOpen
 			if not menuOpen then self:hide() end
 			UiModalEnd()
