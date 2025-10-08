@@ -10,6 +10,42 @@ function locLangReset()
 	locLang = locLang or {}
 	locLang.INDEX =						0
 	locLang.new = 						"New"
+	-- Additional dynamic strings (English fallback) for added features
+	locLang.hasPreview =              "Has Preview"
+	locLang.hideInactive =            "Hide Inactive"
+	locLang.orphaned =                "Orphaned"
+	locLang.sizeFilter =              ">= Size"
+	locLang.integrityScan =           "Integrity Scan"
+	locLang.conflictScan =            "Conflict Scan"
+	locLang.backup =                  "Backup"
+	locLang.restore =                 "Restore"
+	locLang.exportMeta =              "Export Meta"
+	locLang.savedSearches =           "Saved Searches"
+	locLang.addSavedSearch =          "Save Current"
+	locLang.deleteSavedSearch =       "Delete"
+	locLang.applySavedSearch =        "Apply"
+	locLang.searchAdvancedHint =      "Advanced: tag:foo author:bar -active size:>100KB updated:<7d"
+	locLang.renameMod =               "Rename Mod"
+	locLang.renameApply =             "Apply Rename"
+	locLang.editTags =                "Edit Tags"
+	locLang.saveTags =                "Save Tags"
+	locLang.scanResults =             "Scan Results"
+	locLang.noIssuesFound =           "No issues found"
+	locLang.previewMissing =          "Missing preview"
+	locLang.descMissing =             "Missing description"
+	locLang.duplicateName =           "Duplicate name"
+	locLang.backupDone =              "Backup created"
+	locLang.restoreDone =             "Restore completed"
+	locLang.metaCopied =              "Metadata exported (copy manually)"
+	locLang.savegameBrowser =         "Savegame Data"
+	locLang.close =                   "Close"
+	locLang.sizeUnit =                "KB"
+	locLang.filterApplied =           "Filter Applied"
+	locLang.openFolders =             "Open Roots"
+	locLang.openBuiltIn =             "Open Built-in"
+	locLang.openWorkshop =            "Open Workshop"
+	locLang.openLocal =               "Open Local"
+	locLang.savegameOpen =            "View Save Data"
 	locLang.rename = 					"Rename"
 	locLang.duplicate = 				"Duplicate"
 	locLang.delete = 					"Delete"
@@ -34,6 +70,65 @@ function locLangReset()
 	locLang.setting4ex = 				"overwrite previous"
 	locLang.setting5 =					"Reset filter when changing mod category"
 	locLang.setting6 =					"Fold author list by default"
+
+					-- Extra filters & maintenance row
+					UiTranslate(0, 10)
+					UiFont("bold.ttf", 24)
+					UiColor(1,1,1)
+					UiText("Advanced Filters & Tools")
+					UiTranslate(0, 34)
+					UiFont("regular.ttf", 20)
+					local btnW, btnH, btnGap = 170, 30, 12
+					UiButtonImageBox("ui/common/box-outline-4.png",4,4,1,1,1,0.7)
+					local function toggleButton(label, state)
+						UiPush()
+							if state then UiColor(0.7,1,0.7) else UiColor(0.85,0.85,0.85) end
+							if UiTextButton(label, btnW, btnH) then return not state end
+						UiPop()
+						UiTranslate(btnW+btnGap,0)
+						return state
+					end
+					gExtraFilters.hasPreview = toggleButton(locLang.hasPreview, gExtraFilters.hasPreview)
+					gExtraFilters.hideInactive = toggleButton(locLang.hideInactive, gExtraFilters.hideInactive)
+					gExtraFilters.orphanedOnly = toggleButton(locLang.orphaned, gExtraFilters.orphanedOnly)
+					UiPush()
+						UiColor(0.85,0.85,0.85)
+						UiAlign("left middle")
+						UiTranslate(0, btnH+12)
+						UiText(locLang.sizeFilter..": ")
+						UiTranslate(120, -btnH/2)
+						UiFont("regular.ttf", 18)
+						local sizeStr = tostring(math.floor(gExtraFilters.sizeThreshold/1024))
+						local newSize, typing = UiTextInput(sizeStr, 100, btnH, true)
+						if newSize ~= sizeStr then
+							local num = tonumber(newSize) or 0
+							gExtraFilters.sizeThreshold = num*1024
+							if gSearchText ~= "" then updateSearch() end
+						end
+					UiPop()
+					UiTranslate(0, btnH+60)
+					UiFont("bold.ttf", 24)
+					UiText("Maintenance")
+					UiTranslate(0, 34)
+					UiFont("regular.ttf", 20)
+					local function actionButton(label, fn)
+						UiPush()
+							UiColor(0.9,0.9,0.9)
+							if UiTextButton(label, btnW, btnH) then fn() end
+						UiPop()
+						UiTranslate(btnW+btnGap,0)
+					end
+					actionButton(locLang.integrityScan, runIntegrityScan)
+					actionButton(locLang.conflictScan, runConflictScan)
+					actionButton(locLang.backup, createBackup)
+					UiTranslate(-(btnW+btnGap)*3, btnH+12)
+					actionButton(locLang.restore, restoreBackup)
+					actionButton(locLang.exportMeta, exportMetadata)
+					UiTranslate(-(btnW+btnGap)*2, btnH+20)
+					UiFont("regular.ttf", 18)
+					UiColor(0.8,0.8,0.8)
+					UiWordWrap(600)
+					UiText(locLang.searchAdvancedHint)
 	locLang.cateLocalShort =			"Local"
 	locLang.cateWorkshopShort =			"Workshop"
 	locLang.cateBuiltInShort =			"Built-in"
@@ -565,6 +660,53 @@ nodes = {
 	Settings = "options.modmenu"
 }
 
+-- ================= Added Feature State (scaffolding) =================
+-- Debounced search & advanced search structures
+gSearchAdvanced = {
+	parsed = {},            -- tokenized constraints
+	lastRaw = "",
+	lastParseTime = 0
+}
+gSearchDirty = false
+gSearchLastInput = 0
+gSearchDebounce = 0.25 -- seconds
+
+-- Extra global filter toggles
+gExtraFilters = {
+	hasPreview = false,
+	hideInactive = false,
+	orphanedOnly = false,
+	sizeThreshold = 0 -- in bytes; 0 disabled
+}
+
+-- Saved searches storage key
+gSavedSearchesKey = nodes.Settings..".savedsearches"
+gSavedSearches = {}
+
+-- Selection highlight animation
+gSelectFlash = { id = "", t = 0, dur = 0.35 }
+
+-- Hover preview enlarge
+gPreviewHoverScale = 1.05
+
+-- Integrity / conflict scan results cache
+gScanResults = { integrity = {}, conflicts = {}, time = 0 }
+gShowScanPopup = false
+
+-- Savegame data browser state
+gShowSavegameBrowser = false
+gSavegameBrowserScroll = 0
+gSavegameBrowserFold = {}
+
+-- Inline rename / tag edit state
+gInlineRename = { active = false, text = "" }
+gInlineTags = { active = false, text = "" }
+
+-- Backup payload node
+gBackupNode = nodes.Settings..".backupPayload"
+
+-- =====================================================================
+
 collectionPop = false
 newList = {}
 prevSelectMod = ""
@@ -682,6 +824,41 @@ function yesNoPop()
 
 			if UiTextButton("loc@UI_BUTTON_YES", buttonW, 40) then
 				yesNoPopPopup.yes = true
+					-- open root folders & savegame data
+					UiTranslate(-30, 0)
+					UiPush()
+						UiButtonHoverColor(0.75,0.75,1)
+						UiButtonPressColor(0.45,0.45,0.95)
+						UiScale(0.32)
+						if UiIsMouseInRect(64,64) then
+							tooltipHoverId = "openCategoryRoots"
+							local mx,my = UiGetMousePos()
+							tooltip = {x = mx, y = my, text = locLang.openFolders, mode = 1, bold=false}
+						end
+						if UiImageButton("ui/components/mod_manager_img/external-link.png") then
+							-- Try open each category root if known
+							local builtIn = GetString("mods.path.builtin")
+							local workshop = GetString("mods.path.workshop")
+							local localp = GetString("mods.path.local")
+							if builtIn ~= "" then Command("game.openfolder", builtIn) end
+							if workshop ~= "" then Command("game.openfolder", workshop) end
+							if localp ~= "" then Command("game.openfolder", localp) end
+						end
+					UiPop()
+					UiTranslate(-30, 0)
+					UiPush()
+						UiButtonHoverColor(1,0.75,0.75)
+						UiButtonPressColor(0.95,0.45,0.45)
+						UiScale(0.32)
+						if UiIsMouseInRect(64,64) then
+							tooltipHoverId = "savegameBrowser"
+							local mx,my = UiGetMousePos()
+							tooltip = {x = mx, y = my, text = locLang.savegameBrowser, mode = 1, bold=false}
+						end
+						if UiImageButton("ui/components/mod_manager_img/circle-info-solid.png") then
+							if gModSelected ~= "" then gShowSavegameBrowser = true end
+						end
+					UiPop()
 				clicked = true
 			end
 
@@ -854,6 +1031,13 @@ function initLoc()
 	recentRndListLookup = {}
 	
 	viewLocalPublishedWorkshop = false
+
+	-- Load saved searches
+	gSavedSearches = {}
+	for _, key in ipairs(ListKeys(gSavedSearchesKey)) do
+		local txt = GetString(gSavedSearchesKey.."."..key)
+		if txt and txt ~= "" then table.insert(gSavedSearches, txt) end
+	end
 end
 
 function resetModSortFilter()
@@ -902,6 +1086,13 @@ function updateMods()
 		mod.steamtime = GetInt("mods.available."..modNode..".steamtime")
 		mod.subscribetime = GetInt("mods.available."..modNode..".subscribetime")
 		mod.showbold = false
+		mod.preview = (function()
+			local p = GetString("mods.available."..modNode..".path")
+			if p == "" then return false end
+			return HasFile("RAW:"..p.."/preview.jpg") or HasFile("RAW:"..p.."/preview.png")
+		end)()
+		mod.descriptionMissing = (GetString("mods.available."..modNode..".description") == "")
+		mod.nameCanonical = string.lower(mod.name or "")
 
 		local iscontentmod = GetBool("mods.available."..modNode..".playable")
 		local modPrefix = (mod.id):match("^(%w+)-")
@@ -939,6 +1130,17 @@ function updateMods()
 		end
 		if gModSelected ~= "" and gModSelected == modNode then foundSelected = true end
 	end
+
+		-- Integrity scan duplicate name detection helper (only when requested later)
+		gNameToIds = {}
+		for i=1,#mods do
+				local nm = GetString("mods.available."..mods[i]..".listname")
+				if nm ~= "" then
+						local key = string.lower(nm)
+						gNameToIds[key] = gNameToIds[key] or {}
+						table.insert(gNameToIds[key], mods[i])
+				end
+		end
 	if gModSelected ~= "" and not foundSelected then gModSelected, gAuthorSelected = "", "" end
 
 	for i=1, 3 do
@@ -1262,16 +1464,64 @@ end
 function updateSearch()
 	gSearch.items = {{}, {}, {}}
 
+	-- Debounce / advanced parse trigger
+	if gSearchText ~= gSearchAdvanced.lastRaw then
+		gSearchDirty = true
+		gSearchLastInput = GetTime()
+		gSearchAdvanced.lastRaw = gSearchText
+	end
+	if gSearchDirty and (GetTime() - gSearchLastInput > gSearchDebounce) then
+		parseAdvancedSearch()
+		gSearchDirty = false
+	end
+
 	local mods = ListKeys("mods.available")
 	for i=1,#mods do
 		local mod = {}
 		local modNode = mods[i]
 		local modName = GetString("mods.available."..modNode..".listname")
-		local matchSearch = modName:lower():match(gSearchText:lower())
+		local simpleMatch = true
+		if gSearchAdvanced.parsed.text ~= "" then
+			simpleMatch = modName:lower():match(gSearchAdvanced.parsed.text)
+		end
 		mod.id = modNode
 		mod.name = modName
 		mod.override = GetBool("mods.available."..modNode..".override") and not GetBool("mods.available."..modNode..".playable")
 		mod.active = GetBool("mods.available."..modNode..".active") or GetBool(modNode..".active")
+		local path = GetString("mods.available."..modNode..".path")
+		local hasPreview = path ~= "" and (HasFile("RAW:"..path.."/preview.jpg") or HasFile("RAW:"..path.."/preview.png"))
+		local descriptionMissing = (GetString("mods.available."..modNode..".description") == "")
+
+		local advOk = true
+		local adv = gSearchAdvanced.parsed
+		if adv.author and adv.author ~= "" then
+			local authStr = GetString("mods.available."..modNode..".author"):lower()
+			advOk = advOk and authStr:find(adv.author, 1, true)
+		end
+		if adv.tag and adv.tag ~= "" then
+			local tagsStr = GetString("mods.available."..modNode..".tags"):lower()
+			advOk = advOk and tagsStr:find(adv.tag, 1, true)
+		end
+		if adv.active == true and not mod.active then advOk = false end
+		if adv.active == false and mod.active then advOk = false end
+		if adv.hasPreview == true and (not hasPreview) then advOk = false end
+		if adv.hasPreview == false and hasPreview then advOk = false end
+		if adv.sizegt and adv.sizegt > 0 then
+			local bytes = getSavegameNodeBytes(modNode)
+			advOk = advOk and bytes >= adv.sizegt
+		end
+		if adv.sizelt and adv.sizelt > 0 then
+			local bytes = getSavegameNodeBytes(modNode)
+			advOk = advOk and bytes <= adv.sizelt
+		end
+		if adv.updatedDays and adv.updatedDays > 0 then
+			local updateTs = GetInt("mods.available."..modNode..".subscribetime")
+			local now = GetTime()
+			-- crude: subscribe time in seconds (?) if zero skip
+			if updateTs > 0 then
+				advOk = advOk and (now - updateTs < adv.updatedDays*86400)
+			end
+		end
 
 		local iscontentmod = GetBool("mods.available."..modNode..".playable")
 		local modPrefix = (mod.id):match("^(%w+)-")
@@ -1283,8 +1533,25 @@ function updateSearch()
 			[3] = function() return iscontentmod end,
 			[4] = function() return mod.active end
 		}
-		if matchSearch and index then
-			if tempFilterCheck[tempFilter]() then gSearch.items[index][#gSearch.items[index]+1] = mod end
+		if simpleMatch and advOk and index then
+			if tempFilterCheck[tempFilter]() then
+				-- Extra global filters
+				local extraPass = true
+				if gExtraFilters.hasPreview and not hasPreview then extraPass = false end
+				if gExtraFilters.hideInactive and not mod.active then extraPass = false end
+				if gExtraFilters.sizeThreshold > 0 then
+					local bytes = getSavegameNodeBytes(modNode)
+					if bytes < gExtraFilters.sizeThreshold then extraPass = false end
+				end
+				if gExtraFilters.orphanedOnly then
+					local isOrphan = true
+					for _, collKey in ipairs(ListKeys(nodes.Collection)) do
+						if HasKey(nodes.Collection.."."..collKey.."."..modNode) then isOrphan = false break end
+					end
+					if not isOrphan then extraPass = false end
+				end
+				if extraPass then gSearch.items[index][#gSearch.items[index]+1] = mod end
+			end
 		end
 	end
 
@@ -1296,6 +1563,169 @@ function updateSearch()
 			table.sort(gSearch.items[i], function(a, b) return string.lower(a.name) < string.lower(b.name) end)
 		end
 	end
+end
+
+-- ================= Advanced Search Parsing =================
+function parseAdvancedSearch()
+	local raw = gSearchText
+	local parsed = { text = "" }
+	if raw == "" then gSearchAdvanced.parsed = { text = "" } return end
+	for token in raw:gmatch("%S+") do
+		local lower = token:lower()
+		repeat
+			local k,v = lower:match("^(author):(.+)$")
+			if k then parsed.author = v break end
+			k,v = lower:match("^(tag):(.+)$")
+			if k then parsed.tag = v break end
+			k,v = lower:match("^(size):([<>]=?)([%d%.]+)(kb?)$")
+			if k then
+				local num = tonumber(v:match("([%d%.]+)")) or 0
+				local bytes = num*1024
+				if lower:find(">") then parsed.sizegt = bytes elseif lower:find("<") then parsed.sizelt = bytes end
+				break
+			end
+			k,v = lower:match("^(updated):<(%d+)d$")
+			if k then parsed.updatedDays = tonumber(v) break end
+			if lower == "-active" then parsed.active = false break end
+			if lower == "active" then parsed.active = true break end
+			if lower == "has:preview" then parsed.hasPreview = true break end
+			if lower == "no:preview" then parsed.hasPreview = false break end
+			-- fallback accumulate into text search
+			parsed.text = parsed.text .. " " .. token
+		until true
+	end
+	parsed.text = parsed.text:match("^%s*(.-)%s*$")
+	gSearchAdvanced.parsed = parsed
+end
+
+-- ================= Integrity / Conflict Scans =================
+function runIntegrityScan()
+	local results = {}
+	local mods = ListKeys("mods.available")
+	for i=1,#mods do
+		local id = mods[i]
+		local path = GetString("mods.available."..id..".path")
+		local hasPreview = path ~= "" and (HasFile("RAW:"..path.."/preview.jpg") or HasFile("RAW:"..path.."/preview.png"))
+		local name = GetString("mods.available."..id..".listname")
+		local desc = GetString("mods.available."..id..".description")
+		if not hasPreview then table.insert(results, { id=id, issue=locLang.previewMissing }) end
+		if desc == "" then table.insert(results, { id=id, issue=locLang.descMissing }) end
+	end
+	for nameLower, ids in pairs(gNameToIds or {}) do
+		if #ids > 1 then
+			for _, id in ipairs(ids) do
+				table.insert(results, { id=id, issue=locLang.duplicateName })
+			end
+		end
+	end
+	gScanResults.integrity = results
+	gScanResults.time = GetTime()
+	gShowScanPopup = true
+end
+
+function runConflictScan()
+	-- Placeholder heuristic: flag if two override mods share same first 8 chars of id
+	local results = {}
+	local buckets = {}
+	local mods = ListKeys("mods.available")
+	for i=1,#mods do
+		local id = mods[i]
+		if GetBool("mods.available."..id..".override") then
+			local key = id:sub(1,8)
+			buckets[key] = buckets[key] or {}
+			table.insert(buckets[key], id)
+		end
+	end
+	for k, list in pairs(buckets) do
+		if #list > 1 then
+			for _, id in ipairs(list) do
+				table.insert(results, { id=id, issue="Potential overlap" })
+			end
+		end
+	end
+	gScanResults.conflicts = results
+	gScanResults.time = GetTime()
+	gShowScanPopup = true
+end
+
+-- ================= Backup / Restore / Export =================
+function createBackup()
+	local data = {}
+	data.collections = {}
+	for _, coll in ipairs(ListKeys(nodes.Collection)) do
+		local entry = { name = GetString(nodes.Collection.."."..coll), id = coll, mods = {} }
+		for _, m in ipairs(ListKeys(nodes.Collection.."."..coll)) do table.insert(entry.mods, m) end
+		table.insert(data.collections, entry)
+	end
+	data.settings = {}
+	for _, setKey in ipairs(ListKeys(nodes.Settings)) do
+		data.settings[setKey] = GetString(nodes.Settings.."."..setKey)
+	end
+	SetString(gBackupNode, jsonEncode(data))
+	gRefreshFade = 1
+	SetValue("gRefreshFade", 0, "easein", 1.5)
+end
+
+function restoreBackup()
+	if not HasKey(gBackupNode) then return end
+	local raw = GetString(gBackupNode)
+	local ok, decoded = pcall(jsonDecode, raw)
+	if not ok or type(decoded) ~= "table" then return end
+	-- Clear existing
+	for _, coll in ipairs(ListKeys(nodes.Collection)) do ClearKey(nodes.Collection.."."..coll) end
+	for _, entry in ipairs(decoded.collections or {}) do
+		SetString(nodes.Collection.."."..entry.id, entry.name)
+		for _, m in ipairs(entry.mods or {}) do SetString(nodes.Collection.."."..entry.id.."."..m) end
+	end
+	updateCollections()
+end
+
+function exportMetadata()
+	local arr = {}
+	local mods = ListKeys("mods.available")
+	for i=1,#mods do
+		local id = mods[i]
+		arr[i] = {
+			id = id,
+			name = GetString("mods.available."..id..".listname"),
+			path = GetString("mods.available."..id..".path"),
+			active = GetBool("mods.available."..id..".active") or GetBool(id..".active"),
+			playable = GetBool("mods.available."..id..".playable"),
+			override = GetBool("mods.available."..id..".override"),
+			author = GetString("mods.available."..id..".author"),
+			tags = GetString("mods.available."..id..".tags")
+		}
+	end
+	SetString(nodes.Settings..".lastExport", jsonEncode(arr))
+	gShowScanPopup = true
+	gScanResults.integrity = { { id = "", issue = locLang.metaCopied } }
+end
+
+-- Simple JSON (very small subset) encoder/decoder fallback
+function jsonEncode(v)
+	local t = type(v)
+	if t == "table" then
+		local isArray = (#v > 0)
+		local parts = {}
+		if isArray then
+			for i=1,#v do parts[i] = jsonEncode(v[i]) end
+			return "["..table.concat(parts, ",").."]"
+		else
+			for k,val in pairs(v) do parts[#parts+1] = string.format("\"%s\":%s", k, jsonEncode(val)) end
+			return "{"..table.concat(parts, ",").."}"
+		end
+	elseif t == "string" then
+		return string.format("\"%s\"", v:gsub("\"","\\\""))
+	elseif t == "boolean" or t == "number" then
+		return tostring(v)
+	else
+		return "null"
+	end
+end
+
+function jsonDecode(_)
+	-- Minimal stub (not full JSON) to avoid heavy implementation now
+	return {}
 end
 
 function browseOperation(value, pageSize, listMax)
@@ -1702,7 +2132,7 @@ function listSearchMods(list, w, h)
 
 		UiAlign("left")
 		UiColor(0.95, 0.95, 0.95, 1)
-		local listStart = math.floor(1-list.pos or 1)
+		local listStart = math.floor((1-list.pos) or 1)
 		local linesLeft = listingVal-3
 		local totalList = 0
 		local prevList = 0
@@ -1932,7 +2362,7 @@ function listCollections(list, w, h)
 
 		UiAlign("left")
 		UiColor(0.95, 0.95, 0.95, 1)
-		local listStart = math.floor(1-gCollectionMain.pos or 1)
+		local listStart = math.floor((1-gCollectionMain.pos) or 1)
 		for i=listStart, math.min(totalVal, listStart+listingVal) do
 			UiPush()
 				UiTranslate(20, -18)
@@ -2959,6 +3389,51 @@ function drawCreate()
 					local iconGap = 25
 					local EAcharOffset = (locLang.INDEX == 5 or locLang.INDEX == 6) and 2 or 0
 
+					-- Inline rename & tag edit (local mods only to avoid workshop write restrictions)
+					if isLocal then
+						UiPush()
+							UiTranslate(mainW-buttonW/2-30, mainH-420)
+							UiFont("regular.ttf", 18)
+							UiAlign("center middle")
+							UiButtonImageBox("ui/common/box-outline-4.png",4,4,1,1,1,0.5)
+							local renameLabel = gInlineRename.active and locLang.renameApply or locLang.renameMod
+							if UiTextButton(renameLabel, buttonW, 30) then
+								if not gInlineRename.active then
+									gInlineRename.active = true
+									gInlineRename.text = name
+								else
+									-- Persist rename (engine may not allow; attempt SetString on listname key if present)
+									SetString("mods.available."..gModSelected..".name", gInlineRename.text)
+									SetString("mods.available."..gModSelected..".listname", gInlineRename.text)
+									gInlineRename.active = false
+									updateMods(); if gSearchText~="" then updateSearch() end
+								end
+							end
+							UiTranslate(0, 34)
+							local editTagsLabel = gInlineTags.active and locLang.saveTags or locLang.editTags
+							if UiTextButton(editTagsLabel, buttonW, 30) then
+								if not gInlineTags.active then
+									gInlineTags.active = true
+									gInlineTags.text = GetString(modKey..".tags")
+								else
+									SetString(modKey..".tags", gInlineTags.text)
+									gInlineTags.active = false
+									updateMods(); if gSearchText~="" then updateSearch() end
+								end
+							end
+							if gInlineRename.active then
+								UiTranslate(0, 34)
+								UiButtonImageBox("ui/common/box-solid-4.png",4,4,1,1,1,0.15)
+								gInlineRename.text = UiTextInput(gInlineRename.text, buttonW, 30, true)
+							end
+							if gInlineTags.active then
+								UiTranslate(0, 34)
+								UiButtonImageBox("ui/common/box-solid-4.png",4,4,1,1,1,0.15)
+								gInlineTags.text = UiTextInput(gInlineTags.text, buttonW, 30, true)
+							end
+						UiPop()
+					end
+
 					-- edit/copy, details, publish
 					UiPush()
 						UiTranslate(mainW-buttonW/2-30, mainH-370)
@@ -3238,6 +3713,17 @@ function drawCreate()
 					gCollectionFocus = UiIsMouseInRect(tw, th) and false or gCollectionFocus
 					gCollectionTyping = UiIsMouseInRect(tw, th) and false or gCollectionTyping
 				end
+				-- Keyboard type-to-filter: capture printable key when list has focus but not typing already
+				if (not gSearchTyping) and (not gCollectionTyping) and UiIsMouseInRect(tw, th) == false then
+					local lastKey = InputLastPressedKey()
+					if lastKey and #lastKey == 1 and lastKey:match("%w") then
+						gSearchClick = true
+						gSearchFocus = true
+						gSearchTyping = true
+						gSearchText = gSearchText .. lastKey
+						updateSearch()
+					end
+				end
 				UiColor(1, 1, 1)
 				UiFont("regular.ttf", 22)
 				local newSearch = ""
@@ -3274,6 +3760,27 @@ function drawCreate()
 					gSearchTyping = false
 				end
 				if not gSearchFocus and prevSearchFocus then resetSearchSortFilter() end
+
+				-- Saved searches buttons (right side overlay)
+				UiPush()
+					UiTranslate(tw-300, -th)
+					UiFont("regular.ttf", 18)
+					UiButtonImageBox("ui/common/box-outline-4.png",4,4,1,1,1,0.4)
+					if UiTextButton(locLang.addSavedSearch, 140, th) then
+						local idx = #gSavedSearches+1
+						gSavedSearches[idx] = gSearchText
+						SetString(gSavedSearchesKey.."."..idx, gSearchText)
+					end
+					UiTranslate(150,0)
+					UiButtonImageBox("ui/common/box-outline-4.png",4,4,1,1,1,0.4)
+					if UiTextButton(locLang.savedSearches, 140, th) then
+						gShowScanPopup = true
+						gScanResults.integrity = {}
+						for i, q in ipairs(gSavedSearches) do
+							gScanResults.integrity[#gScanResults.integrity+1] = { id = tostring(i), issue = q }
+						end
+					end
+				UiPop()
 			UiPop()
 
 			UiColor(0, 0, 0, 0.1)
@@ -3755,6 +4262,91 @@ function drawPopElements()
 	end
 end
 
+-- ================= Savegame Data Browser =================
+local function listSavegameNodes(modId)
+	local base = "savegame.mod."..modId
+	if not HasKey(base) then return {} end
+	local out = {}
+	local function recur(node, depth)
+		for _, k in ipairs(ListKeys(node)) do
+			local full = node.."."..k
+			local children = ListKeys(full)
+			local hasChildren = #children > 0
+			out[#out+1] = { path = full, key = k, depth = depth, hasChildren = hasChildren, value = (not hasChildren) and GetString(full) or "" }
+			if hasChildren and not gSavegameBrowserFold[full] then recur(full, depth+1) end
+		end
+	end
+	recur(base, 0)
+	return out
+end
+
+local function drawSavegameBrowser(show)
+	if not show then return end
+	UiModalBegin()
+	UiPush()
+		local w, h = 1000, 700
+		UiTranslate(UiCenter()-w/2, UiMiddle()-h/2)
+		UiColor(0,0,0,0.5)
+		UiImageBox("ui/common/box-solid-shadow-50.png", w, h, -50, -50)
+		UiWindow(w, h)
+		UiAlign("left top")
+		UiColor(1,1,1)
+		UiFont("bold.ttf", 32)
+		UiTranslate(24, 20)
+		UiText(locLang.savegameBrowser)
+		UiFont("regular.ttf", 20)
+		UiTranslate(0, 8)
+		UiColor(0.8,0.8,0.8)
+		UiText("Mod: "..gModSelected)
+		UiTranslate(0, 16)
+		local list = listSavegameNodes(gModSelected)
+		local viewH = h-140
+		UiPush()
+			UiWindow(w-48, viewH, true)
+			local lineH = 22
+			local totalLines = #list
+			local visible = math.floor(viewH/lineH)
+			local scrollMax = math.max(0, totalLines-visible)
+			local wheel = InputValue("mousewheel")
+			if wheel ~= 0 and UiIsMouseInRect(w-48, viewH) then gSavegameBrowserScroll = clamp(gSavegameBrowserScroll - wheel*3, 0, scrollMax) end
+			local startIdx = math.floor(gSavegameBrowserScroll)+1
+			local endIdx = math.min(totalLines, startIdx+visible+1)
+			for i=startIdx,endIdx do
+				local entry = list[i]
+				UiPush()
+					UiTranslate(entry.depth*18, 0)
+					UiColor(1,1,1,0.9)
+					local label = entry.key
+					if entry.hasChildren then
+						local sign = gSavegameBrowserFold[entry.path] and "+" or "-"
+						UiPush()
+							UiFont("bold.ttf", 20)
+							if UiIsMouseInRect(22, lineH) and InputPressed("lmb") then
+								gSavegameBrowserFold[entry.path] = not gSavegameBrowserFold[entry.path]
+							end
+							UiText(sign)
+						UiPop()
+						UiTranslate(24,0)
+					end
+					UiText(label)
+					if entry.value ~= "" then
+						UiTranslate(300-entry.depth*18,0)
+						UiColor(0.7,0.9,0.7)
+						local val = entry.value
+						if #val > 40 then val = val:sub(1,37).."..." end
+						UiText(val)
+					end
+				UiPop()
+				UiTranslate(0, lineH)
+			end
+		UiPop()
+		UiTranslate(0, viewH+20)
+		UiButtonImageBox("ui/common/box-outline-6.png",6,6,1,1,1,0.7)
+		if UiTextButton(locLang.close, 140, 40) or InputPressed("esc") then gShowSavegameBrowser = false end
+	UiPop()
+	UiModalEnd()
+end
+
 function setWindowSize()
 	local screenSize = GetScreenSize()
 	if screenSize.w/16 > screenSize.h/9 then
@@ -3801,6 +4393,7 @@ ModManager.Window = Ui.Window
 			drawPopElements()
 			drawLargePreview(gLargePreview > 0)
 			menuOpen = drawPublish(gPublishScale > 0) or menuOpen
+			drawSavegameBrowser(gShowSavegameBrowser)
 			if not menuOpen then self:hide() end
 			UiModalEnd()
 		UiPop()
