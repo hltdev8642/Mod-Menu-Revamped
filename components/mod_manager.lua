@@ -699,11 +699,13 @@ gInlineTags = { active = false, text = "" }
 -- Savegame data browser state
 gSavegameBrowser = { show = false, data = {}, editMode = false, editedData = {}, statusMessage = nil, statusColor = {1, 1, 1}, statusFade = 0 }
 
--- Batch selection state
-
-gSelectedMods = {}
+-- Batch collection popup state (used for adding filtered mods)
 gShowBatchCollectionPopup = false
 gBatchCollectionScroll = 0
+
+-- Multi-selection state (shift-select support)
+gMultiSelected = {}
+gLastMultiSelected = ""
 
 -- Backup payload node
 gBackupNode = nodes.Settings..".backupPayload"
@@ -1927,14 +1929,23 @@ function listMods(list, w, h, issubscribedlist, useSection)
 						mouseOverThisMod = true
 						UiColor(0, 0, 0, 0.1)
 						if InputPressed("lmb") and gModSelected ~= id then
-							UiSound("terminal/message-select.ogg")
-							ret = id
-							if useSection then
-								gAuthorSelected = subListName or ""
+							-- shift-select toggles multi-selection; otherwise select single
+							if InputDown("shift") then
+								gMultiSelected[id] = not gMultiSelected[id]
+								gLastMultiSelected = id
 							else
-								local modAuthorStr = GetString("mods.available."..id..".author")
-								modAuthorStr = modAuthorStr == "" and "%,unknown,%" or modAuthorStr
-								gAuthorSelected = strSplit(modAuthorStr, ",")[1]
+								gMultiSelected = {}
+								gMultiSelected[id] = true
+								gLastMultiSelected = id
+								UiSound("terminal/message-select.ogg")
+								ret = id
+								if useSection then
+									gAuthorSelected = subListName or ""
+								else
+									local modAuthorStr = GetString("mods.available."..id..".author")
+									modAuthorStr = modAuthorStr == "" and "%,unknown,%" or modAuthorStr
+									gAuthorSelected = strSplit(modAuthorStr, ",")[1]
+								end
 							end
 						elseif InputPressed("rmb") then
 							ret = id
@@ -1971,7 +1982,7 @@ function listMods(list, w, h, issubscribedlist, useSection)
 						end
 					UiPop()
 				end
-
+				-- removed per-item batch selection checkbox (replaced by 'Add filtered to collection' button)
 				UiPush()
 					UiTranslate(10, 0)
 					local boldName = subList[i].showbold
@@ -2196,8 +2207,16 @@ function listSearchMods(list, w, h)
 						mouseOverThisMod = true
 						UiColor(0, 0, 0, 0.1)
 						if InputPressed("lmb") and gModSelected ~= id then
-							UiSound("terminal/message-select.ogg")
-							ret = id
+							if InputDown("shift") then
+								gMultiSelected[id] = not gMultiSelected[id]
+								gLastMultiSelected = id
+							else
+								gMultiSelected = {}
+								gMultiSelected[id] = true
+								gLastMultiSelected = id
+								UiSound("terminal/message-select.ogg")
+								ret = id
+							end
 						elseif InputPressed("rmb") then
 							ret = id
 							rmb_pushed = true
@@ -2379,12 +2398,25 @@ function listCollections(list, w, h)
 				UiScale(0.5)
 				if list[i].itemLookup[gModSelected] then
 					if UiImageButton("ui/hud/checkmark.png", 36, 36) then
-						handleModCollect(list[i].lookup)
+						-- If multi-selected mods exist, add all of them to this collection
+						local anyMulti = false
+						for mid, v in pairs(gMultiSelected) do if v then anyMulti = true break end end
+						if anyMulti then
+							for mid, v in pairs(gMultiSelected) do if v then SetString(nodes.Collection.."."..list[i].lookup.."."..mid) end end
+						else
+							handleModCollect(list[i].lookup)
+						end
 						updateCollections(true)
 					end
 				else
 					if UiBlankButton(36, 36) then
-						handleModCollect(list[i].lookup)
+						local anyMulti = false
+						for mid, v in pairs(gMultiSelected) do if v then anyMulti = true break end end
+						if anyMulti then
+							for mid, v in pairs(gMultiSelected) do if v then SetString(nodes.Collection.."."..list[i].lookup.."."..mid) end end
+						else
+							handleModCollect(list[i].lookup)
+						end
 						updateCollections(true)
 					end
 				end
@@ -2623,14 +2655,22 @@ function listCollectionMods(mainList, w, h, selected, useSection)
 						mouseOverThisMod = true
 						UiColor(0, 0, 0, 0.1)
 						if InputPressed("lmb") and gModSelected ~= id then
-							UiSound("terminal/message-select.ogg")
-							ret = id
-							if useSection then
-								gAuthorSelected = subListName or ""
+							if InputDown("shift") then
+								gMultiSelected[id] = not gMultiSelected[id]
+								gLastMultiSelected = id
 							else
-								local modAuthorStr = GetString("mods.available."..id..".author")
-								modAuthorStr = modAuthorStr == "" and "%,unknown,%" or modAuthorStr
-								gAuthorSelected = strSplit(modAuthorStr, ",")[1]
+								gMultiSelected = {}
+								gMultiSelected[id] = true
+								gLastMultiSelected = id
+								UiSound("terminal/message-select.ogg")
+								ret = id
+								if useSection then
+									gAuthorSelected = subListName or ""
+								else
+									local modAuthorStr = GetString("mods.available."..id..".author")
+									modAuthorStr = modAuthorStr == "" and "%,unknown,%" or modAuthorStr
+									gAuthorSelected = strSplit(modAuthorStr, ",")[1]
+								end
 							end
 						elseif InputPressed("rmb") then
 							ret = id
@@ -2735,37 +2775,23 @@ function listCollectionMods(mainList, w, h, selected, useSection)
 	return ret, rmb_pushed
 end
 
-function getVisibleModIds()
-	local visibleMods = {}
-	
-	if gSearchText ~= "" then
-		-- Search mode: collect from all search result categories
-		for categoryIndex = 1, 3 do
-			for _, mod in ipairs(gSearch.items[categoryIndex]) do
-				table.insert(visibleMods, mod.id)
+function getNodeBytes(keyNode, indentLevel)
+	local totalBytes = 0
+	for _, nextNode in ipairs(ListKeys(keyNode)) do
+		repeat
+			local nextKeyNode = keyNode.."."..nextNode
+			local nextIndent = indentLevel + 1
+			local nodeNameBytes = #nextNode
+			local nodeValueBytes = #GetString(nextKeyNode)
+			if #ListKeys(nextKeyNode) > 0 then
+				totalBytes = totalBytes + getNodeBytes(nextKeyNode, nextIndent)
+				totalBytes = totalBytes + nextIndent*2 + nodeNameBytes*2 + 7 + (nodeValueBytes > 0 and (9+nodeValueBytes) or 0)
+				break
 			end
-		end
-	else
-		-- Normal mode: collect from current category
-		local currentList = gMods[category.Index]
-		if currentList.sort == 1 then
-			-- Author-sorted mode: iterate through sections
-			for sectionIndex, section in ipairs(currentList.items) do
-				if not currentList.fold[sectionIndex] then
-					for _, mod in ipairs(section) do
-						table.insert(visibleMods, mod.id)
-					end
-				end
-			end
-		else
-			-- Normal sorted mode: direct iteration
-			for _, mod in ipairs(currentList.items) do
-				table.insert(visibleMods, mod.id)
-			end
-		end
+			totalBytes = totalBytes + nextIndent + nodeNameBytes + 4 + (nodeValueBytes > 0 and (9+nodeValueBytes) or 0)
+		until true
 	end
-	
-	return visibleMods
+	return totalBytes
 end
 
 function getSavegameNodeBytes(modNode)
@@ -3163,24 +3189,7 @@ function drawCreate()
 					end
 				UiPop()
 
-				-- Add all visible mods to collection button
-				UiPush()
-					UiTranslate(0, 32)
-					UiFont("regular.ttf", 18)
-					UiButtonImageBox("ui/common/box-solid-4.png", 4, 4, 1, 1, 1, 0.1)
-					UiColor(0.8, 1, 0.8)
-					if UiTextButton("Add all visible to collection", 220, 28) then
-						-- Get all visible mod IDs and show collection selection popup
-						local visibleMods = getVisibleModIds()
-						if #visibleMods > 0 then
-							gSelectedMods = {}
-							for _, modId in ipairs(visibleMods) do
-								gSelectedMods[modId] = true
-							end
-							gShowBatchCollectionPopup = true
-						end
-					end
-				UiPop()
+				-- batch select removed; replaced by 'Add filtered to collection' in collection section
 				local h = category.Index == 2 and listH-44 or listH
 				local selected, rmb_pushed, searchCategory
 
@@ -3918,6 +3927,20 @@ function drawCreate()
 						gCollectionTyping = false
 					end
 				UiPop()
+				-- Add 'Add filtered to collection' button below the new-collection field (right side)
+				UiPush()
+					-- place on the right side below the input; match drawFilter button style
+					local addBtnW = 184
+					local addBtnH = 26
+					UiTranslate(listW - addBtnW - 4, -12)
+					UiFont("regular.ttf", 19)
+					UiButtonImageBox("ui/common/box-solid-4.png", 4, 4, 1, 1, 1, 0.1)
+					UiColor(0.6, 0.8, 0.6)
+					if UiTextButton(locLang.addFilteredToCollection or "Add filtered to collection", addBtnW, addBtnH) then
+						gShowBatchCollectionPopup = true
+					end
+				UiPop()
+
 				local hcl = 9*22+10
 				local hcm = 17*22+10
 				local rmb_pushedC
@@ -3946,9 +3969,7 @@ function drawCreate()
 						end
 					UiPop()
 
-
-
-					UiTranslate(0, 2)
+					-- (moved 'Add filtered to collection' button to under the new-collection input)
 					-- filter
 					local needUpdate = false
 					gCollectionList.filter, gCollectionList.sort, gCollectionList.sortInv, needUpdate
@@ -4322,9 +4343,15 @@ function drawBatchCollectionPopup()
 			UiFont("bold.ttf", 28)
 			UiAlign("center")
 			UiTranslate(UiCenter(), 20)
-			local selectedCount = 0
-			for _ in pairs(gSelectedMods) do selectedCount = selectedCount + 1 end
-			UiText("Add " .. selectedCount .. " mods to collection")
+			-- Count visible mods in current collection view
+			local visibleCount = 0
+			local displayList = gCollections[gCollectionSelected] and gCollections[gCollectionSelected].items or {}
+			if gCollectionList.sort == 1 then
+				for _, group in ipairs(displayList) do if type(group) == "table" then visibleCount = visibleCount + #group end end
+			else
+				visibleCount = #displayList
+			end
+			UiText("Add " .. visibleCount .. " mods to collection")
 		UiPop()
 		
 		-- Close button
@@ -4375,12 +4402,33 @@ function drawBatchCollectionPopup()
 						UiTranslate(0, (i - gBatchCollectionScroll - 1) * buttonHeight)
 						UiButtonImageBox("ui/common/box-outline-4.png", 4, 4, 0.8, 0.8, 0.8, 0.1)
 						if UiTextButton(collection.name, contentW - 20, buttonHeight - 5) then
-							-- Add selected mods to this collection
-							for modId in pairs(gSelectedMods) do
-								handleModCollect(modId, key)
+							-- Add visible filtered mods to this collection
+							-- Collect visible mods from the currently selected collection view (gCollections[gCollectionSelected].items)
+							local collKey = nodes.Collection.."."..collection
+							-- If collection view is grouped (sort==1), items may be nested by author
+							local visibleMods = {}
+							local displayList = gCollections[gCollectionSelected].items
+							if type(displayList) == "table" then
+								if gCollectionList.sort == 1 then
+									-- grouped by authors: list is an array of arrays
+									for _, group in ipairs(displayList) do
+										if type(group) == "table" then
+											for _, mod in ipairs(group) do
+												if mod and mod.id then visibleMods[#visibleMods+1] = mod.id end
+											end
+										end
+									end
+								else
+									for _, mod in ipairs(displayList) do
+										if mod and mod.id then visibleMods[#visibleMods+1] = mod.id end
+									end
+								end
 							end
+							for _, modId in ipairs(visibleMods) do
+								SetString(collKey.."."..modId)
+							end
+							updateCollectMods(gCollectionSelected)
 							gShowBatchCollectionPopup = false
-							gSelectedMods = {}
 							break
 						end
 					UiPop()
