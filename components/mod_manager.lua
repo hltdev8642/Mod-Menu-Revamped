@@ -171,8 +171,8 @@ contextMenu.Collection = function(sel_collect)
 	local open = true
 	UiModalBegin()
 	UiPush()
-		local w = contextMenu.IsCollection and contextMenu.MenuWidth.collectionW or contextMenu.MenuWidth.colModsW
-		local h = contextMenu.IsCollection and 22*6+16 or 22*3+16
+		local w = contextMenu.IsCollection and (contextMenu.MenuWidth.collectionW + 180) or contextMenu.MenuWidth.colModsW
+		local h = contextMenu.IsCollection and 22*8+16 or 22*3+16
 		local x = contextMenu.PosX
 		local y = contextMenu.PosY
 
@@ -284,6 +284,37 @@ contextMenu.Collection = function(sel_collect)
 		UiColor(1, 1, 1, 1)
 		UiText(locLang.collectEnabled)
 		UiTranslate(0, 22)
+
+		-- Export collection IDs
+		if contextMenu.IsCollection then
+			if UiIsMouseInRect(w, 22) then
+				UiColor(1, 1, 1, 0.2)
+				UiRect(w, 22)
+				if InputPressed("lmb") then
+					gCollectionTransferText = table.concat(ListKeys(nodes.Collection.."."..sel_collect), "\n")
+					gCollectionExporting = true
+					open = false
+				end
+			end
+			UiColor(1, 1, 1, 1)
+			UiText("Export IDs…")
+			UiTranslate(0, 22)
+
+			-- Import collection IDs
+			if UiIsMouseInRect(w, 22) then
+				UiColor(1, 1, 1, 0.2)
+				UiRect(w, 22)
+				if InputPressed("lmb") then
+					gCollectionTransferText = ""
+					gCollectionImporting = true
+					contextMenu.Item = sel_collect
+					open = false
+				end
+			end
+			UiColor(1, 1, 1, 1)
+			UiText("Import IDs…")
+			UiTranslate(0, 22)
+		end
 	UiPop()
 	UiModalEnd()
 
@@ -806,6 +837,54 @@ yesNoPopPopup = {
 	no_fn	= nil
 }
 
+-- Collection export/import modal state
+gCollectionExporting = false
+gCollectionImporting = false
+gCollectionTransferText = ""
+gCollectionFileName = "collection.txt"
+gCollectionsFolderPath = nil
+
+-- File-based export/import helpers
+local function ensureCollectionsFolder()
+	if not gCollectionsFolderPath then
+		-- Prefer savegame path if available, otherwise fallback to relative folder
+		local base = GetPath and GetPath("savegame") or ""
+		gCollectionsFolderPath = (base ~= "" and (base.."/collections")) or "collections"
+	end
+	if MakeDirectory then MakeDirectory(gCollectionsFolderPath) end
+	return gCollectionsFolderPath
+end
+
+local function exportCollectionToFile(collectionLookup, fileName)
+	local folder = ensureCollectionsFolder()
+	local name = (fileName and #fileName > 0) and fileName or (collectionLookup..".txt")
+	local path = folder.."/"..name
+	local items = {}
+	for _, id in ipairs(ListKeys(nodes.Collection.."."..collectionLookup)) do
+		table.insert(items, id)
+	end
+	local content = table.concat(items, "\n")
+	if SaveFile then
+		SaveFile(path, content)
+		return true, path
+	end
+	return false, path
+end
+
+local function importCollectionFromFile(collectionLookup, fileName, replaceDefault)
+	local folder = ensureCollectionsFolder()
+	local name = (fileName and #fileName > 0) and fileName or (collectionLookup..".txt")
+	local path = folder.."/"..name
+	if LoadFile then
+		local content = LoadFile(path)
+		if content and #content > 0 then
+			importCollectionFromText(collectionLookup, content, replaceDefault ~= false)
+			return true, path
+		end
+	end
+	return false, path
+end
+
 function yesNoPopInit(text, item, fn, fn1)
 	yesNoPopPopup.show		= true
 	yesNoPopPopup.yes		= false
@@ -1041,7 +1120,7 @@ function initLoc()
 	viewLocalPublishedWorkshop = false
 
 	-- Load persisted favorites
-	loadFavorites()
+	-- loadFavorites()
 end
 
 function resetModSortFilter()
@@ -1322,6 +1401,18 @@ function updateCollectMods(id)
 		gCollections[id].total = authorCount
 		gCollections[id].fold = tempFoldList
 	end
+end
+
+-- Export/import helpers
+local function importCollectionFromText(collectionLookup, text)
+	local collNode = nodes.Collection.."."..collectionLookup
+	for _, m in ipairs(ListKeys(collNode)) do ClearKey(collNode.."."..m) end
+	for line in string.gmatch(text or "", "[^\r\n,]+") do
+		local id = sanitizeInput(line)
+		if id ~= "" then SetString(collNode.."."..id) end
+	end
+	updateCollections(true)
+	updateCollectMods(gCollectionSelected)
 end
 
 function handleModCollect(collection)
@@ -3300,10 +3391,12 @@ function drawCreate()
 								UiTranslate(0, poH-titleH-10)
 								UiFont("regular.ttf", 16)
 								UiColor(0.9, 0.9, 0.9)
-								if HasKey("savegame.mod."..gModSelected) then
+								local hasData = HasKey("savegame.mod."..gModSelected)
+								local displayBytes, unitIndex, formattedBytes
+								if hasData then
 									UiTranslate(0, -22)
-									local displayBytes, unitIndex = truncateBytesUnits(getSavegameNodeBytes(gModSelected))
-									local formattedBytes = string.format(byteUnitFormat[unitIndex], displayBytes, byteUnitSuffix[unitIndex])
+									displayBytes, unitIndex = truncateBytesUnits(getSavegameNodeBytes(gModSelected))
+									formattedBytes = string.format(byteUnitFormat[unitIndex], displayBytes, byteUnitSuffix[unitIndex])
 									UiButtonHoverColor(0.75, 0.75, 0.3)
 									UiButtonPressColor(0.75, 0.75, 0.75)
 									UiButtonPressDist(0.1)
@@ -3315,6 +3408,7 @@ function drawCreate()
 										end
 									UiPop()
 								end
+								UiColorFilter(1,1,1,1)
 								if timestamp ~= "" then
 									UiTranslate(0, -22)
 									UiText(locLangStrUpdateAt..timestamp)
@@ -3361,6 +3455,29 @@ function drawCreate()
 									UiText("loc@UI_BUTTON_EDIT")
 								UiPop()
 							end
+							-- Savegame/Registry editor button (local mods: always show under Edit or at top of local block)
+							UiTranslate(0, modButtonT)
+							UiPush()
+								if UiIsMouseInRect(buttonW, modButtonH) then UiColorFilter(1, 1, 0.35) end
+								if UiBlankButton(buttonW, modButtonH) then
+									gRegEditor = gRegEditor or { show=false }
+									gRegEditor.show = true
+									local modPath = "savegame.mod."..(gModSelected or "")
+									gRegEditor.path = HasKey(modPath) and modPath or "savegame.mod"
+									gRegEditor.scroll = 0
+									gRegEditor.selected = ""
+									gRegEditor.editKey = ""
+									gRegEditor.editValue = ""
+								end
+								UiTranslate(iconLeft-buttonW/2, 0)
+								UiPush()
+									UiScale(0.34375)
+									UiImage("ui/components/mod_manager_img/database-solid.png")
+								UiPop()
+								UiTranslate(iconGap, EAcharOffset)
+								UiAlign("left middle")
+								UiText(locLang.savegameBrowser or "Savegame Data")
+							UiPop()
 							UiTranslate(0, modButtonT)
 							UiPush()
 								if not GetBool("game.workshop")or not GetBool("game.workshop.publish") then 
@@ -3371,6 +3488,7 @@ function drawCreate()
 								end
 								if UiBlankButton(buttonW, modButtonH) then
 									gPublishLangTitle = nil
+
 									gPublishLangDesc = nil
 									gPublishLangIndex = locLang.INDEX
 									gPublishDropdown = false
@@ -3445,6 +3563,29 @@ function drawCreate()
 								else
 									UiText(displayText)
 								end
+							UiPop()
+							-- Savegame/Registry editor button (workshop/built-in: always show under Make Local Copy)
+							UiTranslate(0, modButtonT)
+							UiPush()
+								if UiIsMouseInRect(buttonW, modButtonH) then UiColorFilter(1, 1, 0.35) end
+								if UiBlankButton(buttonW, modButtonH) then
+									gRegEditor = gRegEditor or { show=false }
+									gRegEditor.show = true
+									local modPath = "savegame.mod."..(gModSelected or "")
+									gRegEditor.path = HasKey(modPath) and modPath or "savegame.mod"
+									gRegEditor.scroll = 0
+									gRegEditor.selected = ""
+									gRegEditor.editKey = ""
+									gRegEditor.editValue = ""
+								end
+								UiTranslate(iconLeft-buttonW/2, 0)
+								UiPush()
+									UiScale(0.34375)
+									UiImage("ui/components/mod_manager_img/database-solid.png")
+								UiPop()
+								UiTranslate(iconGap, EAcharOffset)
+								UiAlign("left middle")
+								UiText(locLang.savegameBrowser or "Savegame Data")
 							UiPop()
 						end
 						if hasId then
@@ -3659,14 +3800,14 @@ function drawCreate()
 				if not gSearchFocus and prevSearchFocus then resetSearchSortFilter() end
 
 				-- advanced search syntax hint (always visible, subtle)
-				UiPush()
-					UiTranslate(4, th+4)
-					UiFont("regular.ttf", 16)
-					UiColor(0.7, 0.7, 0.7, 0.55)
-					UiWordWrap(tw-8)
-					local hint = "Syntax: term \"exact phrase\" author:foo tag:bar -tag:beta type:local|workshop|builtin is:active|playable|override has:options"
-					UiText(hint)
-				UiPop()
+				-- UiPush()
+				-- 	UiTranslate(4, th+4)
+				-- 	UiFont("regular.ttf", 16)
+				-- 	UiColor(0.7, 0.7, 0.7, 0.55)
+				-- 	UiWordWrap(tw-8)
+				-- 	local hint = "Syntax: term \"exact phrase\" author:foo tag:bar -tag:beta type:local|workshop|builtin is:active|playable|override has:options"
+				-- 	UiText(hint)
+				-- UiPop()
 			UiPop()
 
 			UiColor(0, 0, 0, 0.1)
@@ -4125,6 +4266,229 @@ function drawPopElements()
 		if not contextMenu.Show then contextMenu.Scale = 0 end
 	end
 
+	-- collection export/import modal
+	if gCollectionExporting or gCollectionImporting then
+		UiModalBegin()
+		UiBlur(0.35)
+		UiPush()
+			local w = 720
+			local h = gCollectionExporting and 520 or 580
+			UiTranslate(UiCenter()-w/2, UiMiddle()-h/2)
+			UiAlign("top left")
+			UiWindow(w, h)
+			UiColor(0.2, 0.2, 0.2)
+			UiImageBox("common/box-solid-6.png", w, h, 6, 6)
+			UiColor(1, 1, 1)
+			UiImageBox("common/box-outline-6.png", w, h, 6, 6)
+
+			UiTranslate(16, 16)
+			UiFont("bold.ttf", 28)
+			UiText(gCollectionExporting and "Collection Export" or "Collection Import")
+			UiTranslate(0, 18)
+			UiFont("regular.ttf", 20)
+			UiWordWrap(w-32)
+			local help = gCollectionExporting and "Copy the list of mod IDs below (one per line), or save to a file." or "Paste mod IDs below (one per line or comma-separated) to replace this collection, or load from a file."
+			UiText(help)
+
+			UiTranslate(0, 16)
+			UiPush()
+				UiColor(1,1,1,0.07)
+				UiImageBox("ui/common/box-solid-6.png", w-32, h-240, 6, 6)
+				UiTranslate(8, 8)
+				UiFont("regular.ttf", 18)
+				UiColor(1,1,1)
+				local tw, th = w-48, h-256
+				if gCollectionExporting then
+					UiWindow(tw, th, true, true)
+					UiText(gCollectionTransferText, true)
+				else
+					local newText, _ = UiTextInput(gCollectionTransferText, tw, th, true)
+					gCollectionTransferText = newText
+				end
+			UiPop()
+
+			-- File operations row
+			UiTranslate(0, 12)
+			UiFont("regular.ttf", 20)
+			UiText("Filename:")
+			UiTranslate(100, -6)
+			UiPush()
+				UiFont("regular.ttf", 20)
+				UiColor(1,1,1,0.1)
+				UiImageBox("ui/common/box-solid-6.png", w-260, 44, 6, 6)
+				UiTranslate(8, 6)
+				UiColor(1,1,1,1)
+				local fname, _ = UiTextInput(gCollectionFileName or "collection.txt", w-276, 32)
+				gCollectionFileName = sanitizeInput(fname)
+			UiPop()
+			UiTranslate(0, 56)
+			UiPush()
+				UiButtonImageBox("ui/common/box-outline-6.png", 6, 6, 1, 1, 1, 0.7)
+				if gCollectionExporting then
+					if UiTextButton("Save .txt", 160, 42) then
+						local collLookup = contextMenu.Item or (gCollections[gCollectionSelected] and gCollections[gCollectionSelected].lookup or "")
+						if collLookup ~= "" then exportCollectionToFile(collLookup, gCollectionFileName) end
+					end
+				else
+					if UiTextButton("Load .txt", 160, 42) then
+						local collLookup = contextMenu.Item or (gCollections[gCollectionSelected] and gCollections[gCollectionSelected].lookup or "")
+						if collLookup ~= "" then importCollectionFromFile(collLookup, gCollectionFileName, true) end
+					end
+				end
+			UiPop()
+			UiTranslate(170, 0)
+			UiPush()
+				UiButtonImageBox("ui/common/box-outline-6.png", 6, 6, 1, 1, 1, 0.7)
+				if UiTextButton("Open Folder", 180, 42) then
+					local folder = ensureCollectionsFolder()
+					if OpenLink then OpenLink("file://"..folder) end
+				end
+			UiPop()
+
+			UiTranslate(0, h-120)
+			UiButtonImageBox("ui/common/box-outline-6.png", 6, 6, 1, 1, 1, 0.7)
+			UiFont("regular.ttf", 24)
+			UiPush()
+				if UiTextButton("Close", 150, 42) then gCollectionExporting = false; gCollectionImporting = false end
+			UiPop()
+			UiTranslate(170, 0)
+			if gCollectionImporting then
+				UiPush()
+					local collLookup = contextMenu.Item or (gCollections[gCollectionSelected] and gCollections[gCollectionSelected].lookup or "")
+					if UiTextButton("Import", 150, 42) then
+						if collLookup ~= "" then importCollectionFromText(collLookup, gCollectionTransferText) end
+						gCollectionExporting = false; gCollectionImporting = false
+					end
+				UiPop()
+			end
+		UiPop()
+		UiModalEnd()
+	end
+
+	-- registry/savegame editor modal
+	if gRegEditor and gRegEditor.show then
+		UiModalBegin()
+		UiBlur(0.35)
+		UiPush()
+			local w, h = 900, 640
+			UiTranslate(UiCenter()-w/2, UiMiddle()-h/2)
+			UiAlign("top left")
+			UiWindow(w, h)
+			UiColor(0.18,0.18,0.18)
+			UiImageBox("common/box-solid-6.png", w, h, 6, 6)
+			UiColor(1,1,1)
+			UiImageBox("common/box-outline-6.png", w, h, 6, 6)
+
+			-- Extra padding to prevent title overlapping window chrome
+			UiTranslate(16,44)
+			UiFont("bold.ttf", 28)
+			UiText("Registry / Savegame Editor")
+			UiTranslate(0, 34)
+			UiFont("regular.ttf", 18)
+			UiColor(0.85,0.85,0.85)
+			UiText("Path: "..(gRegEditor.path or ""))
+
+			-- Build key list
+			local keys = {}
+			local listNode = gRegEditor.path
+			if HasKey(listNode) then
+				for _, k in ipairs(ListKeys(listNode)) do table.insert(keys, k) end
+				table.sort(keys, function(a,b) return string.lower(a) < string.lower(b) end)
+			end
+
+			UiTranslate(0, 12)
+			UiPush()
+				UiColor(1,1,1,0.08)
+				UiImageBox("ui/common/box-solid-6.png", w-32, 320, 6, 6)
+				UiTranslate(8,8)
+				UiWindow(w-48, 304, true)
+				UiFont("regular.ttf", 18)
+				UiColor(1,1,1,0.85)
+				local lineH = 24
+				local maxLines = math.floor(304/lineH)
+				local startIndex = math.max(1, 1 + math.floor(-gRegEditor.scroll))
+				local endIndex = math.min(#keys, startIndex + maxLines)
+				for i = startIndex, endIndex do
+					local k = keys[i]
+					local fullKey = listNode.."."..k
+					local isGroup = (#ListKeys(fullKey) > 0)
+					local display = k .. (isGroup and "/" or "")
+					if UiIsMouseInRect(w-48, lineH) then
+						UiColor(1,1,1,0.15)
+						UiRect(w-48, lineH)
+						UiColor(1,1,1,0.85)
+						if InputPressed("lmb") then
+							if isGroup then
+								gRegEditor.path = fullKey
+								gRegEditor.scroll = 0
+								gRegEditor.selected = ""
+							else
+								gRegEditor.selected = fullKey
+								gRegEditor.editKey = k
+								gRegEditor.editValue = GetString(fullKey)
+							end
+						end
+					end
+					UiText(display)
+					UiTranslate(0, lineH)
+				end
+				local wheel = InputValue("mousewheel")
+				if wheel ~= 0 then
+					gRegEditor.scroll = math.min(0, gRegEditor.scroll + wheel*(InputDown("shift") and 4 or 1))
+				end
+			UiPop()
+
+			UiTranslate(0, 340)
+			UiFont("bold.ttf", 22)
+			UiText("Selected Key")
+			UiTranslate(0, 8)
+			UiFont("regular.ttf", 18)
+			UiPush()
+				UiColor(1,1,1,0.08)
+				UiImageBox("ui/common/box-solid-6.png", w-32, 120, 6, 6)
+				UiTranslate(8,8)
+				if gRegEditor.selected ~= "" then
+					UiFont("regular.ttf", 18)
+					UiColor(1,1,1,0.65)
+					UiText(gRegEditor.selected)
+					UiTranslate(0, 8)
+					UiColor(1,1,1,1)
+					local newVal, _ = UiTextInput(gRegEditor.editValue or "", w-48, 32)
+					gRegEditor.editValue = newVal
+				else
+					UiColor(1,1,1,0.35)
+					UiText("(none)")
+				end
+			UiPop()
+
+			UiTranslate(0, 140)
+			UiButtonImageBox("ui/common/box-outline-6.png", 6, 6, 1, 1, 1, 0.7)
+			UiFont("regular.ttf", 22)
+			UiPush()
+				if UiTextButton("Up", 120, 42) then
+					if gRegEditor.path ~= "savegame" then
+						local parent = gRegEditor.path:match("^(.*)%.([^%.]+)$")
+						if parent and parent ~= "" then gRegEditor.path = parent else gRegEditor.path = "savegame" end
+						gRegEditor.scroll = 0
+						gRegEditor.selected = ""
+					end
+				end
+			UiPop()
+			UiTranslate(130, 0)
+			UiPush()
+				if UiTextButton("Save", 140, 42) and gRegEditor.selected ~= "" then
+					SetString(gRegEditor.selected, gRegEditor.editValue or "")
+				end
+			UiPop()
+			UiTranslate(280, 0)
+			UiPush()
+				if UiTextButton("Close", 140, 42) then
+					gRegEditor.show = false
+				end
+			UiPop()
+		UiPop()
+		UiModalEnd()
+	end
 	if collectionPop then
 		if contextMenu.GetMousePos then
 			contextMenu.PosX, contextMenu.PosY = UiGetMousePos()
