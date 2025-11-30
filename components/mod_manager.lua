@@ -1983,8 +1983,15 @@ function listMods(list, w, h, issubscribedlist, useSection)
 					UiPop()
 				end
 				-- removed per-item batch selection checkbox (replaced by 'Add filtered to collection' button)
+				if gMultiSelected[id] then
+					UiPush()
+						UiTranslate(25, -6)
+						UiScale(0.5)
+						UiImage("ui/hud/checkmark.png")
+					UiPop()
+				end
 				UiPush()
-					UiTranslate(10, 0)
+					UiTranslate(35, 0)
 					local boldName = subList[i].showbold
 					if issubscribedlist and boldName then UiFont("bold.ttf", 20) end
 					local modName = subList[i].name
@@ -2246,8 +2253,15 @@ function listSearchMods(list, w, h)
 						end
 					UiPop()
 				end
+				if gMultiSelected[id] then
+					UiPush()
+						UiTranslate(25, -6)
+						UiScale(0.5)
+						UiImage("ui/hud/checkmark.png")
+					UiPop()
+				end
 				UiPush()
-					UiTranslate(10, 0)
+					UiTranslate(35, 0)
 					local modName = subList[i].name
 					local nameLength = UiText(modName)
 					if mouseOverThisMod then
@@ -2708,7 +2722,7 @@ function listCollectionMods(mainList, w, h, selected, useSection)
 					UiPop()
 				end
 				UiPush()
-					UiTranslate(10, 0)
+					UiTranslate(35, 0)
 					local modName = subList[i].name
 					local nameLength = UiText(modName)
 					if mouseOverThisMod then
