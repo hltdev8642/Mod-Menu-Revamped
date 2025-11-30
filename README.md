@@ -25,6 +25,7 @@
 * Tooltips
 * Preview publish mod name & description in other languages
 * Integration for viewing player character mod via character menu
+* Debounced search input (performance improvement)
 
 ## [Download & Installation](../../releases)
 

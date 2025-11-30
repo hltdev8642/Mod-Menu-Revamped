@@ -574,6 +574,106 @@ tempcharctrSelect = ""
 tempcharctrSetTime = -1
 prevPreview = ""
 
+-- Added state for multi-select and search debounce (v1.4.6-dev)
+gMultiSelected = {}          -- lookup table: modId => true if selected in multi-select
+gSelectAnchor = nil          -- anchor mod for shift-range selection
+searchDebounceDelay = 0.25   -- seconds before applying search after last key press
+searchPending = false        -- flag indicating pending debounced search update
+searchLastInputTime = 0      -- time of last search input change
+
+-- Centralized sanitization & safe getters
+function sanitizeInput(str)
+	if not str then return "" end
+	-- remove non-printable except basic punctuation
+	str = str:gsub("[^%w%p\r\n ]", "")
+	-- trim
+	str = str:gsub("^%s+", ""):gsub("%s+$", "")
+	return str
+end
+
+function safeGetString(node, default)
+	if HasKey(node) then
+		local s = GetString(node)
+		if s and #s > 0 then return s end
+	end
+	return default
+end
+
+-- Favorites feature removed
+
+-- Multi-select helpers
+function clearMultiSelect()
+	gMultiSelected = {}
+	gSelectAnchor = nil
+end
+
+function addToMultiSelect(modId)
+	if not modId or modId == "" then return end
+	gMultiSelected[modId] = true
+	if not gSelectAnchor then gSelectAnchor = modId end
+end
+
+function toggleMultiSelect(modId)
+	if not modId or modId == "" then return end
+	if gMultiSelected[modId] then
+		gMultiSelected[modId] = nil
+		if gSelectAnchor == modId then gSelectAnchor = nil end
+	else
+		addToMultiSelect(modId)
+	end
+end
+
+-- Range select within current visible list (simplified – ignores author grouping sections)
+function rangeMultiSelect(list, targetId)
+	if not gSelectAnchor or not targetId or gSelectAnchor == targetId then addToMultiSelect(targetId) return end
+	local anchorIndex, targetIndex = nil, nil
+	for i, item in ipairs(list.items) do
+		if item.id == gSelectAnchor then anchorIndex = i end
+		if item.id == targetId then targetIndex = i end
+		if anchorIndex and targetIndex then break end
+	end
+	if not anchorIndex or not targetIndex then addToMultiSelect(targetId) return end
+	local s, e = math.min(anchorIndex, targetIndex), math.max(anchorIndex, targetIndex)
+	for i = s, e do
+		local id = list.items[i] and list.items[i].id
+		if id then gMultiSelected[id] = true end
+	end
+end
+
+-- Flatten list for sectioned author view
+function flattenSectioned(list)
+	local flat = {}
+	for _, section in ipairs(list.items) do
+		for _, mod in ipairs(section) do table.insert(flat, mod) end
+	end
+	return flat
+end
+
+-- Batch operations (activate/deactivate selected)
+function batchToggleSelected(activate)
+	for modId, _ in pairs(gMultiSelected) do
+		local key = "mods.available."..modId..".active"
+		local isActive = GetBool(key) or GetBool(modId..".active")
+		if activate and not isActive then Command("mods.activate", modId) end
+		if not activate and isActive then Command("mods.deactivate", modId) end
+	end
+	updateMods(); updateCollections(true); if gSearchText ~= "" then updateSearch() end
+end
+
+function batchAddSelectedToCollection(collectionIndex)
+	local coll = gCollections[collectionIndex]
+	if not coll then return end
+	local collNode = nodes.Collection.."."..coll.lookup
+	for modId, _ in pairs(gMultiSelected) do SetString(collNode.."."..modId) end
+	updateCollectMods(collectionIndex)
+end
+
+-- Debounced search scheduling
+function scheduleSearchUpdate()
+	searchPending = true
+	searchLastInputTime = GetTime()
+end
+
 webLinks = {
 	projectGithub = "https://github.com/YuLun-bili/Mod-Menu-Revamped",
 	projectCrowdin = "https://crowdin.com/project/yulun-td-mmre"
@@ -854,6 +954,9 @@ function initLoc()
 	recentRndListLookup = {}
 	
 	viewLocalPublishedWorkshop = false
+
+	-- Load persisted favorites
+	loadFavorites()
 end
 
 function resetModSortFilter()
@@ -1137,9 +1240,28 @@ function updateCollectMods(id)
 end
 
 function handleModCollect(collection)
-	local modKey = nodes.Collection.."."..collection.."."..gModSelected
+	-- If there is an active multi-select, toggle collection membership for all selected mods
+	local collNode = nodes.Collection.."."..collection
+	local anySelected = false
+	for _ in pairs(gMultiSelected) do anySelected = true break end
+	if anySelected then
+		for modId, _ in pairs(gMultiSelected) do
+			local modKey = collNode.."."..modId
+			if HasKey(modKey) then
+				ClearKey(modKey)
+			else
+				SetString(modKey)
+			end
+		end
+		updateCollectMods(gCollectionSelected)
+		return
+	end
+
+	-- Fallback to single selected mod behavior
+	local modKey = collNode.."."..gModSelected
 	if HasKey(modKey) then ClearKey(modKey) return end
 	SetString(modKey)
+	updateCollectMods(gCollectionSelected)
 end
 
 function handleModCollectionRemove(id)
@@ -1510,16 +1632,29 @@ function listMods(list, w, h, issubscribedlist, useSection)
 					end
 					if mouseOver and UiIsMouseInRect(w-20, 22) then
 						mouseOverThisMod = true
-						UiColor(0, 0, 0, 0.1)
-						if InputPressed("lmb") and gModSelected ~= id then
-							UiSound("terminal/message-select.ogg")
-							ret = id
-							if useSection then
-								gAuthorSelected = subListName or ""
-							else
-								local modAuthorStr = GetString("mods.available."..id..".author")
-								modAuthorStr = modAuthorStr == "" and "%,unknown,%" or modAuthorStr
-								gAuthorSelected = strSplit(modAuthorStr, ",")[1]
+						local inMulti = gMultiSelected[id]
+						UiColor(0, 0, 0, inMulti and 0.18 or 0.1)
+						if InputPressed("lmb") then
+							if InputDown("ctrl") then
+								-- toggle multi-select without changing main selection (unless none selected)
+								if not gMultiSelected[id] and gModSelected == "" then selectMod(id) end
+								toggleMultiSelect(id)
+							elseif InputDown("shift") then
+								-- range selection across flattened current view
+								local tempList = { items = useSection and flattenSectioned(list) or list.items }
+								rangeMultiSelect(tempList, id)
+								if gModSelected == "" then selectMod(id) end
+							elseif gModSelected ~= id then
+								clearMultiSelect()
+								UiSound("terminal/message-select.ogg")
+								ret = id
+								if useSection then
+									gAuthorSelected = subListName or ""
+								else
+									local modAuthorStr = GetString("mods.available."..id..".author")
+									modAuthorStr = modAuthorStr == "" and "%,unknown,%" or modAuthorStr
+									gAuthorSelected = strSplit(modAuthorStr, ",")[1]
+								end
 							end
 						elseif InputPressed("rmb") then
 							ret = id
@@ -1534,6 +1669,26 @@ function listMods(list, w, h, issubscribedlist, useSection)
 						end
 					end
 					UiRect(w, 22)
+					-- Strong multi-select indicator (listMods)
+					if gMultiSelected[id] then
+						UiPush()
+							UiTranslate(-12, -18)
+							UiColor(0.25,0.6,0.95,0.85)
+							UiRect(6,22)
+						UiPop()
+						UiPush()
+							UiColor(0.25,0.6,0.95,0.22)
+							UiTranslate(0,-18)
+							UiRect(w,22)
+						UiPop()
+						UiPush()
+							UiTranslate(-4, -7)
+							UiAlign("left middle")
+							UiFont("bold.ttf", 18)
+							UiColor(0.25,0.65,1,0.9)
+							UiText("✔")
+						UiPop()
+					end
 				UiPop()
 
 				if subList[i].override then
@@ -1702,7 +1857,7 @@ function listSearchMods(list, w, h)
 
 		UiAlign("left")
 		UiColor(0.95, 0.95, 0.95, 1)
-		local listStart = math.floor(1-list.pos or 1)
+		local listStart = math.floor(1 - list.pos)
 		local linesLeft = listingVal-3
 		local totalList = 0
 		local prevList = 0
@@ -1778,10 +1933,24 @@ function listSearchMods(list, w, h)
 					end
 					if mouseOver and UiIsMouseInRect(w-20, 22) then
 						mouseOverThisMod = true
-						UiColor(0, 0, 0, 0.1)
-						if InputPressed("lmb") and gModSelected ~= id then
-							UiSound("terminal/message-select.ogg")
-							ret = id
+						local inMulti = gMultiSelected[id]
+						UiColor(0, 0, 0, inMulti and 0.18 or 0.1)
+						if InputPressed("lmb") then
+							if InputDown("ctrl") then
+								if not gMultiSelected[id] and gModSelected == "" then selectMod(id) end
+								toggleMultiSelect(id)
+							elseif InputDown("shift") then
+								-- flatten all categories for range
+								local flat = {}
+								for ci=1,3 do for _, m in ipairs(list.items[ci]) do table.insert(flat, m) end end
+								local tempList = { items = flat }
+								rangeMultiSelect(tempList, id)
+								if gModSelected == "" then selectMod(id) end
+							elseif gModSelected ~= id then
+								clearMultiSelect()
+								UiSound("terminal/message-select.ogg")
+								ret = id
+							end
 						elseif InputPressed("rmb") then
 							ret = id
 							rmb_pushed = true
@@ -1789,6 +1958,26 @@ function listSearchMods(list, w, h)
 						end
 					end
 					UiRect(w, 22)
+					-- Strong multi-select indicator (listSearchMods)
+					if gMultiSelected[id] then
+						UiPush()
+							UiTranslate(-12, -18)
+							UiColor(0.25,0.6,0.95,0.85)
+							UiRect(6,22)
+						UiPop()
+						UiPush()
+							UiColor(0.25,0.6,0.95,0.22)
+							UiTranslate(0,-18)
+							UiRect(w,22)
+						UiPop()
+						UiPush()
+							UiTranslate(-4, -7)
+							UiAlign("left middle")
+							UiFont("bold.ttf", 18)
+							UiColor(0.25,0.65,1,0.9)
+							UiText("✔")
+						UiPop()
+					end
 				UiPop()
 
 				if subList[i].override then
@@ -1932,7 +2121,7 @@ function listCollections(list, w, h)
 
 		UiAlign("left")
 		UiColor(0.95, 0.95, 0.95, 1)
-		local listStart = math.floor(1-gCollectionMain.pos or 1)
+		local listStart = math.floor(1 - gCollectionMain.pos)
 		for i=listStart, math.min(totalVal, listStart+listingVal) do
 			UiPush()
 				UiTranslate(20, -18)
@@ -1954,6 +2143,18 @@ function listCollections(list, w, h)
 					end
 				end
 				UiRect(w, 22)
+				if gMultiSelected[id] then
+					UiPush()
+						UiColor(0.25, 0.6, 0.9, 0.25)
+						UiRect(w-22, 22)
+					UiPop()
+				end
+				if gMultiSelected[id] then
+					UiPush()
+						UiColor(0.25, 0.6, 0.9, 0.25)
+						UiRect(w-22, 22)
+					UiPop()
+				end
 			UiPop()
 
 			UiPush()
@@ -2205,16 +2406,27 @@ function listCollectionMods(mainList, w, h, selected, useSection)
 					end
 					if mouseOver and UiIsMouseInRect(w-20, 22) then
 						mouseOverThisMod = true
-						UiColor(0, 0, 0, 0.1)
-						if InputPressed("lmb") and gModSelected ~= id then
-							UiSound("terminal/message-select.ogg")
-							ret = id
-							if useSection then
-								gAuthorSelected = subListName or ""
-							else
-								local modAuthorStr = GetString("mods.available."..id..".author")
-								modAuthorStr = modAuthorStr == "" and "%,unknown,%" or modAuthorStr
-								gAuthorSelected = strSplit(modAuthorStr, ",")[1]
+						local inMulti = gMultiSelected[id]
+						UiColor(0, 0, 0, inMulti and 0.18 or 0.1)
+						if InputPressed("lmb") then
+							if InputDown("ctrl") then
+								if not gMultiSelected[id] and gModSelected == "" then selectMod(id) end
+								toggleMultiSelect(id)
+							elseif InputDown("shift") then
+								local tempList = { items = useSection and flattenSectioned(list) or list.items }
+								rangeMultiSelect(tempList, id)
+								if gModSelected == "" then selectMod(id) end
+							elseif gModSelected ~= id then
+								clearMultiSelect()
+								UiSound("terminal/message-select.ogg")
+								ret = id
+								if useSection then
+									gAuthorSelected = subListName or ""
+								else
+									local modAuthorStr = GetString("mods.available."..id..".author")
+									modAuthorStr = modAuthorStr == "" and "%,unknown,%" or modAuthorStr
+									gAuthorSelected = strSplit(modAuthorStr, ",")[1]
+								end
 							end
 						elseif InputPressed("rmb") then
 							ret = id
@@ -2229,6 +2441,26 @@ function listCollectionMods(mainList, w, h, selected, useSection)
 						end
 					end
 					UiRect(w, 22)
+					-- Strong multi-select indicator (listCollectionMods)
+					if gMultiSelected[id] then
+						UiPush()
+							UiTranslate(-12,-18)
+							UiColor(0.25,0.6,0.95,0.85)
+							UiRect(6,22)
+						UiPop()
+						UiPush()
+							UiColor(0.25,0.6,0.95,0.22)
+							UiTranslate(0,-18)
+							UiRect(w,22)
+						UiPop()
+						UiPush()
+							UiTranslate(-4,-7)
+							UiAlign("left middle")
+							UiFont("bold.ttf", 18)
+							UiColor(0.25,0.65,1,0.9)
+							UiText("✔")
+						UiPop()
+					end
 				UiPop()
 
 				if subList[i].override then
@@ -2675,6 +2907,7 @@ function drawCreate()
 
 			-- mod listing
 			UiPush()
+				-- Favorites feature removed: no favorites row
 				-- category / search
 				UiPush()
 					UiAlign("left bottom")
@@ -2732,7 +2965,12 @@ function drawCreate()
 						if needUpdate then updateSearch() end
 					end
 				UiPop()
-				local h = category.Index == 2 and listH-44 or listH
+				-- Reserve vertical space in Workshop list for batch bar and footer button
+				local h = listH
+				if category.Index == 2 then
+					-- 38px for Manage Subscribed + ~26px for batch bar + small margin
+					h = listH - (38 + 26 + 8)
+				end
 				local selected, rmb_pushed, searchCategory
 
 				if gSearchText ~= "" then
@@ -2753,6 +2991,29 @@ function drawCreate()
 
 				if category.Index==2 then
 					UiPush()
+						-- Draw batch bar above the 'Manage Subscribed' workshop button
+						UiPush()
+							local anySelected=false; for _ in pairs(gMultiSelected) do anySelected=true break end
+							UiTranslate(0, listH-38-26)
+							UiFont("regular.ttf", 16)
+							UiButtonImageBox("ui/common/box-solid-4.png",4,4,1,1,1,0.06)
+							UiColor(0.85,0.85,0.85, anySelected and 1 or 0.55)
+							UiText("Batch:")
+							UiTranslate(54,-2)
+							local function batchBtn(label, fn, enabled)
+								UiPush()
+									if not enabled then UiDisableInput() UiColorFilter(1,1,1,0.4) end
+									UiButtonHoverColor(0.8,0.95,1)
+									UiButtonPressColor(0.6,0.85,1)
+									if UiTextButton(label, 80, 20) and enabled then fn() end
+								UiPop(); UiTranslate(84,0)
+							end
+							batchBtn("Activate", function() batchToggleSelected(true) end, anySelected)
+							batchBtn("Deactivate", function() batchToggleSelected(false) end, anySelected)
+							batchBtn("To Col", function() if gCollectionSelected>0 then batchAddSelectedToCollection(gCollectionSelected) end end, anySelected and gCollectionSelected>0)
+							batchBtn("Clear", function() clearMultiSelect() end, anySelected)
+						UiPop()
+
 						if not GetBool("game.workshop") then 
 							UiPush()
 								UiFont("regular.ttf", 20)
@@ -3266,7 +3527,7 @@ function drawCreate()
 				if newSearch ~= gSearchText then
 					gSearchText = newSearch
 					gSearchFocus = true
-					updateSearch()
+					scheduleSearchUpdate()
 				end
 				if gSearchTyping and InputLastPressedKey() == "esc" then
 					gSearchClick = false
@@ -3783,6 +4044,11 @@ ModManager.Window = Ui.Window
 
 	onDraw = 		function(self)
 		local menuOpen = false
+		-- Debounced search processing
+		if searchPending and (GetTime() - searchLastInputTime) >= searchDebounceDelay then
+			updateSearch()
+			searchPending = false
+		end
 		UiPush()
 			UiModalBegin()
 			-- if tonumber(InputLastPressedKey()) then LoadLanguageTable(InputLastPressedKey()) end
