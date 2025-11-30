@@ -601,6 +601,91 @@ end
 
 -- Favorites feature removed
 
+-- Advanced search helpers
+local function strContains(hay, needle)
+	hay = hay or ""
+	needle = needle or ""
+	if needle == "" then return true end
+	return string.find(string.lower(hay), string.lower(needle), 1, true) ~= nil
+end
+
+local function tokenizeSearch(query)
+	local tokens = {}
+	local i, n = 1, #query
+	while i <= n do
+		while i <= n and string.sub(query, i, i):match("%s") do i = i + 1 end
+		if i > n then break end
+		local ch = string.sub(query, i, i)
+		if ch == '"' then
+			local j = i + 1
+			while j <= n and string.sub(query, j, j) ~= '"' do j = j + 1 end
+			local tok = string.sub(query, i + 1, (j <= n) and (j - 1) or n)
+			tokens[#tokens+1] = tok
+			i = (j <= n) and (j + 1) or (n + 1)
+		else
+			local j = i
+			while j <= n and not string.sub(query, j, j):match("%s") do j = j + 1 end
+			tokens[#tokens+1] = string.sub(query, i, j - 1)
+			i = j
+		end
+	end
+	return tokens
+end
+
+local function parseSearchQuery(query)
+	local crit = {
+		terms = {},
+		negTerms = {},
+		auth = {},
+		notAuth = {},
+		tag = {},
+		notTag = {},
+		id = {},
+		notId = {},
+		typeInc = {},
+		typeExc = {},
+		isActive = nil,
+		isPlayable = nil,
+		isOverride = nil,
+		hasOptions = nil
+	}
+	local add = function(t, v) if v and v ~= "" then t[#t+1] = string.lower(v) end end
+	for _, raw in ipairs(tokenizeSearch(query or "")) do
+		local neg = false
+		if raw:sub(1,1) == '-' then neg = true; raw = raw:sub(2) end
+		local k, v = raw:match("^([^:]+):(.+)$")
+		if k then
+			k = string.lower(k)
+			v = string.lower(v)
+			if k == "author" or k == "auth" then
+				add(neg and crit.notAuth or crit.auth, v)
+			elseif k == "tag" or k == "tags" then
+				add(neg and crit.notTag or crit.tag, v)
+			elseif k == "id" then
+				add(neg and crit.notId or crit.id, v)
+			elseif k == "type" or k == "cat" or k == "category" then
+				local map = { ["local"] = 3, ["workshop"] = 2, ["steam"] = 2, ["builtin"] = 1, ["built-in"] = 1, ["built in"] = 1 }
+				local idx = map[v]
+				if idx then
+					if neg then crit.typeExc[idx] = true else crit.typeInc[idx] = true end
+				end
+			elseif k == "is" then
+				if v == "active" or v == "enabled" then crit.isActive = not neg and true or false end
+				if v == "inactive" or v == "disabled" then crit.isActive = neg and true or false end
+				if v == "playable" then crit.isPlayable = not neg and true or false end
+				if v == "override" then crit.isOverride = not neg and true or false end
+			elseif k == "has" then
+				if v == "options" then crit.hasOptions = not neg and true or false end
+			else
+				add(neg and crit.negTerms or crit.terms, raw)
+			end
+		else
+			add(neg and crit.negTerms or crit.terms, raw)
+		end
+	end
+	return crit
+end
+
 -- Multi-select helpers
 function clearMultiSelect()
 	gMultiSelected = {}
@@ -1384,18 +1469,19 @@ end
 function updateSearch()
 	gSearch.items = {{}, {}, {}}
 
+	local criteria = parseSearchQuery(gSearchText)
 	local mods = ListKeys("mods.available")
 	for i=1,#mods do
 		local mod = {}
 		local modNode = mods[i]
-		local modName = GetString("mods.available."..modNode..".listname")
-		local matchSearch = modName:lower():match(gSearchText:lower())
+		local modKey = "mods.available."..modNode
+		local modName = GetString(modKey..".listname")
 		mod.id = modNode
 		mod.name = modName
-		mod.override = GetBool("mods.available."..modNode..".override") and not GetBool("mods.available."..modNode..".playable")
-		mod.active = GetBool("mods.available."..modNode..".active") or GetBool(modNode..".active")
+		mod.override = GetBool(modKey..".override") and not GetBool(modKey..".playable")
+		mod.active = GetBool(modKey..".active") or GetBool(modNode..".active")
 
-		local iscontentmod = GetBool("mods.available."..modNode..".playable")
+		local iscontentmod = GetBool(modKey..".playable")
 		local modPrefix = (mod.id):match("^(%w+)-")
 		local index = category.Lookup[modPrefix]
 		local tempFilter = gSearch.filter
@@ -1405,7 +1491,43 @@ function updateSearch()
 			[3] = function() return iscontentmod end,
 			[4] = function() return mod.active end
 		}
-		if matchSearch and index then
+
+		local pass = true
+		if index then
+			if next(criteria.typeInc) ~= nil and not criteria.typeInc[index] then pass = false end
+			if criteria.typeExc[index] then pass = false end
+		else
+			pass = false
+		end
+
+		if pass and criteria.isActive ~= nil then pass = (mod.active == criteria.isActive) end
+		if pass and criteria.isPlayable ~= nil then pass = (iscontentmod == criteria.isPlayable) end
+		if pass and criteria.isOverride ~= nil then pass = (mod.override == criteria.isOverride) end
+		if pass and criteria.hasOptions ~= nil then pass = (GetBool(modKey..".options") == criteria.hasOptions) end
+
+		if pass then
+			local authorLc = string.lower(GetString(modKey..".author"))
+			local tagsLc = string.lower(GetString(modKey..".tags"))
+			local nameLc = string.lower(modName)
+			local idLc = string.lower(modNode)
+
+			for _, t in ipairs(criteria.terms) do
+				if not (strContains(nameLc, t) or strContains(tagsLc, t) or strContains(authorLc, t) or strContains(idLc, t)) then pass = false break end
+			end
+			if pass then
+				for _, t in ipairs(criteria.negTerms) do
+					if (strContains(nameLc, t) or strContains(tagsLc, t) or strContains(authorLc, t) or strContains(idLc, t)) then pass = false break end
+				end
+			end
+			if pass then for _, a in ipairs(criteria.auth) do if not strContains(authorLc, a) then pass = false break end end end
+			if pass then for _, a in ipairs(criteria.notAuth) do if strContains(authorLc, a) then pass = false break end end end
+			if pass then for _, tg in ipairs(criteria.tag) do if not strContains(tagsLc, tg) then pass = false break end end end
+			if pass then for _, tg in ipairs(criteria.notTag) do if strContains(tagsLc, tg) then pass = false break end end end
+			if pass then for _, idv in ipairs(criteria.id) do if not strContains(idLc, idv) then pass = false break end end end
+			if pass then for _, idv in ipairs(criteria.notId) do if strContains(idLc, idv) then pass = false break end end end
+		end
+
+		if pass and index then
 			if tempFilterCheck[tempFilter]() then gSearch.items[index][#gSearch.items[index]+1] = mod end
 		end
 	end
