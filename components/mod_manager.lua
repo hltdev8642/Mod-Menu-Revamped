@@ -3657,6 +3657,16 @@ function drawCreate()
 					gSearchTyping = false
 				end
 				if not gSearchFocus and prevSearchFocus then resetSearchSortFilter() end
+
+				-- advanced search syntax hint (always visible, subtle)
+				UiPush()
+					UiTranslate(4, th+4)
+					UiFont("regular.ttf", 16)
+					UiColor(0.7, 0.7, 0.7, 0.55)
+					UiWordWrap(tw-8)
+					local hint = "Syntax: term \"exact phrase\" author:foo tag:bar -tag:beta type:local|workshop|builtin is:active|playable|override has:options"
+					UiText(hint)
+				UiPop()
 			UiPop()
 
 			UiColor(0, 0, 0, 0.1)
