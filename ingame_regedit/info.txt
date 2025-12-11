@@ -1,0 +1,4 @@
+name = MMRV: In-Game Registry Editor
+author = hltdev
+description = Open the same Registry / Savegame editor from in-game.
+tags = Tool

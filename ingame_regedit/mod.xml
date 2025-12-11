@@ -1,0 +1,7 @@
+<mod>
+  <name>MMRV: In-Game Registry Editor</name>
+  <description>Open the same Registry / Savegame editor from in-game.</description>
+  <version>1.0.0</version>
+  <type>script</type>
+  <script>main.lua</script>
+</mod>
