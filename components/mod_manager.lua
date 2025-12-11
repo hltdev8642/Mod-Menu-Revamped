@@ -4506,6 +4506,10 @@ function drawPopElements()
 						gRegEditor.root = "info"
 					elseif gRegEditor.root == "info" then
 						gRegEditor.root = "game"
+					elseif gRegEditor.root == "game" then
+						gRegEditor.root = "mods"
+					elseif gRegEditor.root == "mods" then
+						gRegEditor.root = "mods.available"
 					else
 						gRegEditor.root = "savegame"
 					end
@@ -4627,6 +4631,44 @@ end
 
 ModManager = {}
 
+ModManager.Sort = {
+	["name"] = "Name",
+	["author"] = "Author", 
+	["updated"] = "Updated",
+	["rating"] = "Rating",
+	["subscribers"] = "Subscribers",
+	["size"] = "Size",
+	["downloads"] = "Downloads"
+}
+
+ModManager.Filter = {
+	["all"] = "All",
+	["installed"] = "Installed",
+	["subscribed"] = "Subscribed",
+	["local"] = "Local",
+	["workshop"] = "Workshop"
+}
+
+ModManager.PlayMode = {
+	["play"] = "Play",
+	["edit"] = "Edit",
+	["test"] = "Test"
+}
+
+ModManager.List = function()
+	-- Placeholder for mod list UI
+	return Ui.VerticalLayout {
+		Ui.Text("Mod List Placeholder")
+	}
+end
+
+ModManager.ModItem = function(mod)
+	-- Placeholder for mod item UI
+	return Ui.VerticalLayout {
+		Ui.Text(mod.name or "Unknown Mod")
+	}
+end
+
 function ModManager.OpenRegistryEditor(path)
 	gRegEditor = gRegEditor or {}
 	gRegEditor.show = true
@@ -4640,19 +4682,18 @@ function ModManager.OpenRegistryEditor(path)
 	gRegEditor.error = ""
 end
 
-ModManager.Window = Ui.Window
-{
+ModManager.Window = Ui.Window {
 	w = 1920,
 	h = 1080,
 	animator = { playTime = 0.2 },
     ignoreNavigation = true,
 
-	onPreDraw = 	function(self)
+	onPreDraw = function(self)
 		if self.animator.isFinished then UiSetCursorState(UI_CURSOR_SHOW) end
 		SetFloat("game.music.volume", (1.0 - 0.8 * self.animator.factor))
 	end,
 
-	onDraw = 		function(self)
+	onDraw = function(self)
 		local menuOpen = false
 		-- Debounced search processing
 		if searchPending and (GetTime() - searchLastInputTime) >= searchDebounceDelay then
@@ -4661,18 +4702,6 @@ ModManager.Window = Ui.Window
 		end
 		UiPush()
 			UiModalBegin()
-			-- if tonumber(InputLastPressedKey()) then LoadLanguageTable(InputLastPressedKey()) end
-			-- UiPush()
-			-- 	UiColor(1, 1, 1)
-			-- 	UiAlign("top left")
-			-- 	UiFont("bold.ttf", 24)
-			-- 	UiButtonTextHandling(math.floor((GetTime()/10)%5))
-			-- 	UiButtonImageBox("ui/common/box-outline-6.png", 6, 6)
-			-- 	UiTextButton("euvngpQOE7RNTV[], 4Y N8WENF PUGNVFPasiudfgvblafgb poadnh UA asduk  fbmasovn, opt_h", 60, 30)
-			-- 	UiTranslate(0, 40)
-			-- 	UiText(math.floor((GetTime()/10)%5))
-			-- UiPop()
-			-- damn you saber for spending so long only to failed in implmenting UiButtonTextHandling() mode 1 & 3
 			menuOpen = drawCreate()
 			drawPopElements()
 			drawLargePreview(gLargePreview > 0)
@@ -4682,7 +4711,8 @@ ModManager.Window = Ui.Window
 		UiPop()
 	end,
 
-	onPostDraw =	function(self)
+	onPostDraw = function(self)
+		-- Tooltip logic here
 		UiPush()
 			if tooltipHoverId == "" then
 				if tooltipPrevId ~= "" then
@@ -4755,9 +4785,9 @@ ModManager.Window = Ui.Window
 		tooltipHoverId = ""
 	end,
 
-	onCreate = 		function(self) initLoc() end,
+	onCreate = function(self) initLoc() end,
 
-	onShow = 		function(self)
+	onShow = function(self)
 		self:refresh()
 		initSelect = true
 		ModManager.WindowAnimation.duration = 0.2
@@ -4765,9 +4795,9 @@ ModManager.Window = Ui.Window
 		viewLocalPublishedWorkshop = false
 	end,
 
-	canRestore = 	function(self) return GetString("mods.modmanager.selectedmod") ~= "" end,
+	canRestore = function(self) return GetString("mods.modmanager.selectedmod") ~= "" end,
 
-	onRestore = 	function(self)
+	onRestore = function(self)
 		self:refresh()
 		initSelect = true
 		ModManager.WindowAnimation.duration = 0.0
@@ -4775,14 +4805,14 @@ ModManager.Window = Ui.Window
 		viewLocalPublishedWorkshop = false
 	end,
 
-	onClose = 		function(self)
+	onClose = function(self)
 		ModManager.WindowAnimation.duration = 0.2
 		ModManager.WindowAnimation:init(self)
 		SetString("mods.modmanager.selectedmod", "")
 		viewLocalPublishedWorkshop = false
 	end,
 
-	refresh = 		function(self)
+	refresh = function(self)
 		setWindowSize()
 		updateMods()
 		updateCollections()
@@ -4806,7 +4836,7 @@ ModManager.WindowAnimation =
 
 	play = 		function(self)
 		self:reset()
-		SetValueInTable(self, "progress", 1, self.curve, self.duration)
+		self.progress = 1.0
 	end,
 
 	reset = 	function(self)
