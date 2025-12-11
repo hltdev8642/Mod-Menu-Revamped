@@ -622,6 +622,13 @@ function sanitizeInput(str)
 	return str
 end
 
+function sanitizeKeyName(str)
+	str = str or ""
+	str = sanitizeInput(str)
+	str = str:gsub("[^%w_-]", "_")
+	return str
+end
+
 function safeGetString(node, default)
 	if HasKey(node) then
 		local s = GetString(node)
@@ -4386,7 +4393,7 @@ function drawPopElements()
 			UiTranslate(0, 34)
 			UiFont("regular.ttf", 18)
 			UiColor(0.85,0.85,0.85)
-			UiText("Path: "..(gRegEditor.path or ""))
+			UiText("Path ("..(gRegEditor.root or "savegame").."): "..(gRegEditor.path or ""))
 
 			-- Build key list
 			local keys = {}
@@ -4466,9 +4473,9 @@ function drawPopElements()
 			UiFont("regular.ttf", 22)
 			UiPush()
 				if UiTextButton("Up", 120, 42) then
-					if gRegEditor.path ~= "savegame" then
+					if gRegEditor.path ~= gRegEditor.root then
 						local parent = gRegEditor.path:match("^(.*)%.([^%.]+)$")
-						if parent and parent ~= "" then gRegEditor.path = parent else gRegEditor.path = "savegame" end
+						if parent and parent ~= "" then gRegEditor.path = parent else gRegEditor.path = gRegEditor.root end
 						gRegEditor.scroll = 0
 						gRegEditor.selected = ""
 					end
@@ -4486,6 +4493,99 @@ function drawPopElements()
 					gRegEditor.show = false
 				end
 			UiPop()
+			UiTranslate(430, 0)
+			UiPush()
+				local label = "Root: "..(gRegEditor.root or "savegame")
+				if UiTextButton(label, 180, 42) then
+					-- Cycle root between savegame -> savegame.mod -> options
+					if gRegEditor.root == "savegame" then
+						gRegEditor.root = "savegame.mod"
+					elseif gRegEditor.root == "savegame.mod" then
+						gRegEditor.root = "options"
+					elseif gRegEditor.root == "options" then
+						gRegEditor.root = "info"
+					elseif gRegEditor.root == "info" then
+						gRegEditor.root = "game"
+					else
+						gRegEditor.root = "savegame"
+					end
+					gRegEditor.path = gRegEditor.root
+					gRegEditor.scroll = 0
+					gRegEditor.selected = ""
+					gRegEditor.adding = false
+				end
+			UiPop()
+			UiTranslate(600, 0)
+			UiPush()
+				if UiTextButton("Add Key", 160, 42) then
+					gRegEditor.adding = not gRegEditor.adding
+					if gRegEditor.adding then
+						gRegEditor.newKeyName = gRegEditor.newKeyName or ""
+						gRegEditor.newKeyValue = gRegEditor.newKeyValue or ""
+						gRegEditor.error = ""
+					end
+				end
+			UiPop()
+			if gRegEditor.adding then
+				UiTranslate(-430, 52)
+				UiPush()
+					UiColor(1,1,1,0.08)
+					UiImageBox("ui/common/box-solid-6.png", w-32, 100, 6, 6)
+					UiTranslate(8,8)
+					UiFont("regular.ttf", 18)
+					UiColor(1,1,1,0.85)
+					UiText("New key under: "..(gRegEditor.path or "savegame"))
+					UiTranslate(0, 6)
+					UiPush()
+						UiText("Name:")
+						UiTranslate(70, -4)
+						UiColor(1,1,1,1)
+						gRegEditor.newKeyName = select(1, UiTextInput(gRegEditor.newKeyName or "", 260, 28))
+					UiPop()
+					UiTranslate(0, 34)
+					UiPush()
+						UiText("Value:")
+						UiTranslate(70, -4)
+						gRegEditor.newKeyValue = select(1, UiTextInput(gRegEditor.newKeyValue or "", w-48-70-200, 28))
+					UiPop()
+					UiTranslate(0, 36)
+					UiButtonImageBox("ui/common/box-outline-6.png", 6, 6, 1, 1, 1, 0.7)
+					UiFont("regular.ttf", 20)
+					UiPush()
+						if UiTextButton("Create", 120, 36) then
+							local base = gRegEditor.path or "savegame"
+							local name = sanitizeKeyName(gRegEditor.newKeyName or "")
+							if name == "" then
+								gRegEditor.error = "Invalid key name"
+							elseif HasKey(base.."."..name) then
+								gRegEditor.error = "Key already exists"
+							else
+								SetString(base.."."..name, gRegEditor.newKeyValue or "")
+								gRegEditor.adding = false
+								gRegEditor.selected = base.."."..name
+								gRegEditor.editKey = name
+								gRegEditor.editValue = gRegEditor.newKeyValue or ""
+								gRegEditor.newKeyName = ""
+								gRegEditor.newKeyValue = ""
+								gRegEditor.error = ""
+							end
+						end
+					UiPop()
+					UiTranslate(130, 0)
+					UiPush()
+						if UiTextButton("Cancel", 120, 36) then
+							gRegEditor.adding = false
+							gRegEditor.error = ""
+						end
+					UiPop()
+					if gRegEditor.error and gRegEditor.error ~= "" then
+						UiTranslate(270, 6)
+						UiColor(1,0.4,0.4,0.95)
+						UiText(gRegEditor.error)
+						UiColor(1,1,1,1)
+					end
+				UiPop()
+			end
 		UiPop()
 		UiModalEnd()
 	end
@@ -4526,6 +4626,20 @@ end
 
 
 ModManager = {}
+
+function ModManager.OpenRegistryEditor(path)
+	gRegEditor = gRegEditor or {}
+	gRegEditor.show = true
+	gRegEditor.root = path and path:match("^([^.]+)") or "savegame"
+	gRegEditor.path = path or gRegEditor.root
+	gRegEditor.scroll = 0
+	gRegEditor.selected = ""
+	gRegEditor.adding = false
+	gRegEditor.newKeyName = ""
+	gRegEditor.newKeyValue = ""
+	gRegEditor.error = ""
+end
+
 ModManager.Window = Ui.Window
 {
 	w = 1920,
