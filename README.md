@@ -33,6 +33,11 @@
 
 Open to everyone, but would only accept good ones.
 
+## Dev Notes (Teardown Experimental)
+
+- Experimental 2.x compatibility notes and a manual in-game test checklist: [MOD_MANAGER_UPDATE.md](MOD_MANAGER_UPDATE.md)
+- Quick repo-local smoke check (no Teardown runtime required): [scripts/validate-mod-manager.ps1](scripts/validate-mod-manager.ps1)
+
 ## Other
 
 * Due to game restrictions, some game files cannot be overwritten by mods (unlike tool models or asset scripts). Therefore this mod cannot be published as a workshop mod

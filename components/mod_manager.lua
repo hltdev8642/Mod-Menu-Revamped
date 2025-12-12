@@ -7,6 +7,24 @@
 #include "mod_manager_locLang.lua"
 
 
+local function uiIconButton(path, w, h, showIcon)
+	local x0, y0 = UiGetCursorPos()
+	local clicked = UiBlankButton(w, h)
+	local x1, y1 = UiGetCursorPos()
+	if showIcon and UiHasImage(path) then
+		local iw, ih = UiGetImageSize(path)
+		UiPush()
+			UiTranslate(x0 - x1, y0 - y1)
+			if iw > 0 and ih > 0 then
+				UiScale(w / iw, h / ih)
+			end
+			UiImage(path)
+		UiPop()
+	end
+	return clicked
+end
+
+
 function locLangReset()
 	locLang = locLang or {}
 	locLang.INDEX =						0
@@ -2352,17 +2370,10 @@ function listCollections(list, w, h)
 				UiAlign("left middle")
 				UiTranslate(0, -7)
 				UiButtonImageBox("ui/common/box-outline-4.png", 16, 16, 1, 1, 1, 0.75)
-				UiScale(0.5)
-				if list[i].itemLookup[gModSelected] then
-					if UiImageButton("ui/hud/checkmark.png", 36, 36) then
-						handleModCollect(list[i].lookup)
-						updateCollections(true)
-					end
-				else
-					if UiBlankButton(36, 36) then
-						handleModCollect(list[i].lookup)
-						updateCollections(true)
-					end
+				local checkSize = 18
+				if uiIconButton("ui/hud/checkmark.png", checkSize, checkSize, list[i].itemLookup[gModSelected] ~= nil) then
+					handleModCollect(list[i].lookup)
+					updateCollections(true)
 				end
 			UiPop()
 			UiPush()
@@ -2821,7 +2832,7 @@ function drawFilter(filter, sort, order, isWorkshop, isSearch)
 				UiTranslate(button3w/2, -6)
 				UiAlign("center middle")
 				UiRotate(order and 90 or -90)
-				if UiImageButton("ui/common/play.png", buttonH, button3w) then order = not order needUpdate = true end
+				if uiIconButton("ui/common/play.png", buttonH, button3w, true) then order = not order needUpdate = true end
 			UiPop()
 		UiPop()
 	UiPop()
@@ -3048,11 +3059,9 @@ function drawCreate()
 									UiTranslate(-26, 0)
 									UiAlign("center middle")
 									UiButtonImageBox("ui/common/box-outline-4.png", 16, 16, 1, 1, 1, 0.75)
-									UiScale(0.5)
-									if currSetting then
-										if UiImageButton("ui/hud/checkmark.png", boxSize, boxSize) then SetBool(tempSettingKey, not currSetting) end
-									else
-										if UiBlankButton(boxSize, boxSize) then SetBool(tempSettingKey, not currSetting) end
+									local checkSize = boxSize / 2
+									if uiIconButton("ui/hud/checkmark.png", checkSize, checkSize, currSetting) then
+										SetBool(tempSettingKey, not currSetting)
 									end
 								UiPop()
 							end

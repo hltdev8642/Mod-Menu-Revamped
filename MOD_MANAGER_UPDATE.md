@@ -31,6 +31,7 @@ Key upstream dependencies (vanilla includes):
 - Ensures `ModManager` is not clobbered if already present by using `ModManager = ModManager or {}`.
 - Aligns `ModManager.Sort`, `ModManager.Filter`, and `ModManager.PlayMode` enums with vanilla (`ref/data/ui/components/mod_manager.lua`) including `toString()`.
 - Updates `UiImageBox` usage to match the Experimental 2.x API signature (removes a legacy extra argument on some outline boxes).
+- Updates icon-button rendering to match the Experimental 2.x API signature (`UiImageButton` only accepts a path); sized icon buttons now use a `UiBlankButton` hitbox with an overlaid `UiImage`.
 - Keeps the custom immediate-mode UI implementation (lists, search, collections, registry editor, publish, batch tools) intact.
 
 ### components/mod_manager_locLang.lua
