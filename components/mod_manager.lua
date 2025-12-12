@@ -1121,6 +1121,10 @@ function initLoc()
 	gRefreshFade = 0
 	gShowSetting = false
 
+	gBatchEnable = false
+	gBatchSelected = {}
+	gBatchScroll = 0
+
 	recentRndList = {}
 	recentRndListLookup = {}
 	
@@ -3022,6 +3026,22 @@ function drawCreate()
 								if gSearchText ~= "" then updateSearch() end
 							end
 						UiPop()
+						UiTranslate(-30, 0)
+						UiPush()
+							UiButtonHoverColor(0.75, 1, 0.75)
+							UiButtonPressColor(0.45, 0.95, 0.45)
+							UiScale(0.32)
+							if UiIsMouseInRect(64, 64) then
+								tooltipHoverId = "batchEnableMods"
+								local mouX, mouY = UiGetMousePos()
+								tooltip = {x = mouX, y = mouY, text = "Batch Enable Global Mods", mode = 1, bold = false}
+							end
+							if UiImageButton("ui/components/mod_manager_img/check-solid.png") then
+								gBatchEnable = true
+								gBatchSelected = {}
+								gBatchScroll = 0
+							end
+						UiPop()
 					UiPop()
 				UiPop()
 				UiTranslate(listW+30, 40)
@@ -4593,6 +4613,129 @@ function drawPopElements()
 		UiPop()
 		UiModalEnd()
 	end
+
+	-- batch enable global mods modal
+	if gBatchEnable then
+		UiModalBegin()
+		UiBlur(0.35)
+		UiPush()
+			local w, h = 800, 600
+			UiTranslate(UiCenter()-w/2, UiMiddle()-h/2)
+			UiAlign("top left")
+			UiWindow(w, h)
+			UiColor(0.18,0.18,0.18)
+			UiImageBox("common/box-solid-6.png", w, h, 6, 6)
+			UiColor(1,1,1)
+			UiImageBox("common/box-outline-6.png", w, h, 6, 6)
+
+			UiTranslate(16, 16)
+			UiFont("bold.ttf", 28)
+			UiText("Batch Enable Global Mods")
+			UiTranslate(0, 24)
+			UiFont("regular.ttf", 18)
+			UiColor(0.85,0.85,0.85)
+			UiText("Select mods to enable:")
+
+			-- Build mod list
+			local mods = ListKeys("mods.available")
+			local modList = {}
+			for _, modId in ipairs(mods) do
+				local modPrefix = modId:match("^(%w+)-")
+				if modPrefix == "global" then
+					local name = GetString("mods.available."..modId..".listname") or modId
+					local active = GetBool("mods.available."..modId..".active") or false
+					table.insert(modList, {id = modId, name = name, active = active})
+				end
+			end
+			table.sort(modList, function(a,b) return string.lower(a.name) < string.lower(b.name) end)
+
+			UiTranslate(0, 12)
+			UiPush()
+				UiColor(1,1,1,0.08)
+				UiImageBox("ui/common/box-solid-6.png", w-32, 400, 6, 6)
+				UiTranslate(8,8)
+				UiWindow(w-48, 384, true)
+				UiFont("regular.ttf", 18)
+				UiColor(1,1,1,0.85)
+				local lineH = 24
+				local maxLines = math.floor(384/lineH)
+				local startIndex = math.max(1, 1 + math.floor(-gBatchScroll))
+				local endIndex = math.min(#modList, startIndex + maxLines)
+				for i = startIndex, endIndex do
+					local mod = modList[i]
+					if UiIsMouseInRect(w-48, lineH) then
+						UiColor(1,1,1,0.15)
+						UiRect(w-48, lineH)
+						UiColor(1,1,1,0.85)
+						if InputPressed("lmb") then
+							gBatchSelected[mod.id] = not (gBatchSelected[mod.id] or false)
+						end
+					end
+					-- Checkbox
+					UiPush()
+						UiTranslate(0, 0)
+						UiAlign("center middle")
+						if gBatchSelected[mod.id] then
+							UiColor(0.25,0.6,0.95,0.9)
+							UiRect(16, 16)
+							UiColor(1,1,1)
+							UiFont("bold.ttf", 14)
+							UiText("✓")
+						else
+							UiColor(0.5,0.5,0.5,0.5)
+							UiRect(16, 16)
+						end
+					UiPop()
+					UiTranslate(20, 0)
+					UiText(mod.name)
+					UiTranslate(0, lineH)
+				end
+				local wheel = InputValue("mousewheel")
+				if wheel ~= 0 then
+					gBatchScroll = math.min(0, gBatchScroll + wheel*(InputDown("shift") and 4 or 1))
+				end
+			UiPop()
+
+			UiTranslate(0, 420)
+			UiButtonImageBox("ui/common/box-outline-6.png", 6, 6, 1, 1, 1, 0.7)
+			UiFont("regular.ttf", 22)
+			UiPush()
+				if UiTextButton("Select All", 140, 42) then
+					for _, mod in ipairs(modList) do
+						gBatchSelected[mod.id] = true
+					end
+				end
+			UiPop()
+			UiTranslate(150, 0)
+			UiPush()
+				if UiTextButton("Clear", 120, 42) then
+					gBatchSelected = {}
+				end
+			UiPop()
+			UiTranslate(130, 0)
+			UiPush()
+				if UiTextButton("Enable Selected", 180, 42) then
+					for modId, selected in pairs(gBatchSelected) do
+						if selected then
+							SetBool("mods.available."..modId..".active", true)
+						end
+					end
+					updateMods()
+					updateCollections(true)
+					if gSearchText ~= "" then updateSearch() end
+					gBatchEnable = false
+				end
+			UiPop()
+			UiTranslate(190, 0)
+			UiPush()
+				if UiTextButton("Close", 120, 42) then
+					gBatchEnable = false
+				end
+			UiPop()
+		UiPop()
+		UiModalEnd()
+	end
+
 	if collectionPop then
 		if contextMenu.GetMousePos then
 			contextMenu.PosX, contextMenu.PosY = UiGetMousePos()
