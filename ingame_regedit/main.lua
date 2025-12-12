@@ -17,7 +17,7 @@ local reg = {
 }
 
 -- Bridge state: use Mod Manager's registry editor renderer in-game
-local bridgeActive = false
+-- local bridgeActive = false  -- Disabled to use standalone modal
 
 -- Helpers
 local function sanitizeKeyName(s)
@@ -280,37 +280,18 @@ function tick(dt)
   local hk = string.lower(GetString("savegame.mod.mmrv.regedit.hotkey"))
   if hk == "" then hk = "f8" end
   if InputPressed(hk) then
-    if not bridgeActive then
-      openAtDefaultPath()
-      ModManager = ModManager or {}
-      -- Open via Mod Manager helper to ensure proper permissions and UI
-      if ModManager.OpenRegistryEditor then
-        ModManager.OpenRegistryEditor(reg.root)
-        bridgeActive = true
-      else
-        -- Fallback to local modal if bridge unavailable
-        reg.show = true
-      end
-    else
-      -- Close
-      if ModManager and ModManager.OpenRegistryEditor then
-        gRegEditor = gRegEditor or {}
-        gRegEditor.show = false
-      end
-      bridgeActive = false
+    if reg.show then
       reg.show = false
+    else
+      openAtDefaultPath()
+      reg.show = true
     end
   end
 end
 
 function draw()
-  -- Prefer Mod Manager's registry editor modal when bridge is active
-  if bridgeActive then
-    UiSetCursorState(UI_CURSOR_SHOW)
-    if drawPopElements then drawPopElements() end
-    -- If the modal was closed by Mod Manager, end bridge
-    if not (gRegEditor and gRegEditor.show) then bridgeActive = false end
-  elseif reg.show then
+  -- Use standalone registry editor instead of Mod Manager bridge
+  if reg.show then
     UiSetCursorState(UI_CURSOR_SHOW)
     drawRegEditor()
   end

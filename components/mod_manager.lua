@@ -3184,46 +3184,44 @@ function drawCreate()
 					contextMenu.GetMousePos = true
 				end
 
-				if category.Index==2 then
-					UiPush()
-						-- Draw batch bar above the 'Manage Subscribed' workshop button
+				-- Draw batch bar on all pages
+				UiPush()
+					local anySelected=false; for _ in pairs(gMultiSelected) do anySelected=true break end
+					UiTranslate(0, listH + 8)
+					UiFont("regular.ttf", 16)
+					UiButtonImageBox("ui/common/box-solid-4.png",4,4,1,1,1,0.06)
+					UiColor(0.85,0.85,0.85, anySelected and 1 or 0.55)
+					UiText("Batch:")
+					UiTranslate(54,-2)
+					local function batchBtn(label, fn, enabled)
 						UiPush()
-							local anySelected=false; for _ in pairs(gMultiSelected) do anySelected=true break end
-							UiTranslate(0, listH-38-26)
-							UiFont("regular.ttf", 16)
-							UiButtonImageBox("ui/common/box-solid-4.png",4,4,1,1,1,0.06)
-							UiColor(0.85,0.85,0.85, anySelected and 1 or 0.55)
-							UiText("Batch:")
-							UiTranslate(54,-2)
-							local function batchBtn(label, fn, enabled)
-								UiPush()
-									if not enabled then UiDisableInput() UiColorFilter(1,1,1,0.4) end
-									UiButtonHoverColor(0.8,0.95,1)
-									UiButtonPressColor(0.6,0.85,1)
-									if UiTextButton(label, 80, 20) and enabled then fn() end
-								UiPop(); UiTranslate(84,0)
-							end
-							batchBtn("Activate", function() batchToggleSelected(true) end, anySelected)
-							batchBtn("Deactivate", function() batchToggleSelected(false) end, anySelected)
-							batchBtn("To Col", function() if gCollectionSelected>0 then batchAddSelectedToCollection(gCollectionSelected) end end, anySelected and gCollectionSelected>0)
-							batchBtn("Clear", function() clearMultiSelect() end, anySelected)
-						UiPop()
+							if not enabled then UiDisableInput() UiColorFilter(1,1,1,0.4) end
+							UiButtonHoverColor(0.8,0.95,1)
+							UiButtonPressColor(0.6,0.85,1)
+							if UiTextButton(label, 80, 20) and enabled then fn() end
+						UiPop(); UiTranslate(84,0)
+					end
+					batchBtn("Activate", function() batchToggleSelected(true) end, anySelected)
+					batchBtn("Deactivate", function() batchToggleSelected(false) end, anySelected)
+					batchBtn("To Col", function() if gCollectionSelected>0 then batchAddSelectedToCollection(gCollectionSelected) end end, anySelected and gCollectionSelected>0)
+					batchBtn("Clear", function() clearMultiSelect() end, anySelected)
+				UiPop()
 
-						if not GetBool("game.workshop") then 
-							UiPush()
-								UiFont("regular.ttf", 20)
-								UiTranslate(50, 110)
-								UiColor(0.7, 0.7, 0.7)
-								UiText("loc@UI_TEXT_STEAM_WORKSHOP")
-							UiPop()
-							UiDisableInput()
-							UiColorFilter(1, 1, 1, 0.5)
-						end
-						UiTranslate(0, listH-38)
-						UiFont("regular.ttf", 24)
-						UiButtonImageBox("ui/common/box-solid-6.png", 6, 6, 1, 1, 1, 0.1)
-						if UiTextButton("loc@UI_BUTTON_MANAGE_SUBSCRIBED", listW, 38) then Command("mods.browse") end
-					UiPop()
+				if category.Index==2 then
+					if not GetBool("game.workshop") then
+						UiPush()
+							UiFont("regular.ttf", 20)
+							UiTranslate(50, 110)
+							UiColor(0.7, 0.7, 0.7)
+							UiText("loc@UI_TEXT_STEAM_WORKSHOP")
+						UiPop()
+						UiDisableInput()
+						UiColorFilter(1, 1, 1, 0.5)
+					end
+					UiTranslate(0, listH-38)
+					UiFont("regular.ttf", 24)
+					UiButtonImageBox("ui/common/box-solid-6.png", 6, 6, 1, 1, 1, 0.1)
+					if UiTextButton("loc@UI_BUTTON_MANAGE_SUBSCRIBED", listW, 38) then Command("mods.browse") end
 				end
 				if InputPressed("esc") or (not UiIsMouseInRect(UiWidth(), UiHeight()) and (InputPressed("lmb") or InputPressed("rmb"))) then contextMenu.Show = false end
 			UiPop()
@@ -4352,7 +4350,9 @@ function drawPopElements()
 		UiModalBegin()
 		UiBlur(0.35)
 		UiPush()
-			local w, h = 900, 640
+			local screenSize = GetScreenSize()
+			local w = math.min(900, screenSize.w - 100)
+			local h = math.min(640, screenSize.h - 100)
 			UiTranslate(UiCenter()-w/2, UiMiddle()-h/2)
 			UiAlign("top left")
 			UiWindow(w, h)
@@ -4471,20 +4471,24 @@ function drawPopElements()
 			UiTranslate(430, 0)
 			UiPush()
 				local label = "Root: "..(gRegEditor.root or "savegame")
-				if UiTextButton(label, 180, 42) then
+				if UiTextButton(label, math.min(180, w - 610), 42) then
 					-- Cycle root between savegame -> savegame.mod -> options
 					if gRegEditor.root == "savegame" then
-						gRegEditor.root = "savegame.mod"
-					elseif gRegEditor.root == "savegame.mod" then
-						gRegEditor.root = "options"
-					elseif gRegEditor.root == "options" then
-						gRegEditor.root = "info"
-					elseif gRegEditor.root == "info" then
+						gRegEditor.root = "characters"
+					elseif gRegEditor.root == "characters" then
 						gRegEditor.root = "game"
 					elseif gRegEditor.root == "game" then
+						gRegEditor.root = "hud"
+					elseif gRegEditor.root == "hud" then
+						gRegEditor.root = "level"
+					elseif gRegEditor.root == "level" then
+						gRegEditor.root = "loading"
+					elseif gRegEditor.root == "loading" then
 						gRegEditor.root = "mods"
 					elseif gRegEditor.root == "mods" then
-						gRegEditor.root = "mods.available"
+						gRegEditor.root = "options"
+					elseif gRegEditor.root == "options" then
+						gRegEditor.root = "spawn"
 					else
 						gRegEditor.root = "savegame"
 					end
@@ -4494,9 +4498,9 @@ function drawPopElements()
 					gRegEditor.adding = false
 				end
 			UiPop()
-			UiTranslate(600, 0)
+			UiTranslate(math.max(190, w - 590), 0)
 			UiPush()
-				if UiTextButton("Add Key", 160, 42) then
+				if UiTextButton("Add Key", math.min(160, w - 430), 42) then
 					gRegEditor.adding = not gRegEditor.adding
 					if gRegEditor.adding then
 						gRegEditor.newKeyName = gRegEditor.newKeyName or ""
@@ -4506,7 +4510,7 @@ function drawPopElements()
 				end
 			UiPop()
 			if gRegEditor.adding then
-				UiTranslate(-430, 52)
+				UiTranslate(-w + 20, 52)
 				UiPush()
 					UiColor(1,1,1,0.08)
 					UiImageBox("ui/common/box-solid-6.png", w-32, 100, 6, 6)
@@ -4519,7 +4523,7 @@ function drawPopElements()
 						UiText("Name:")
 						UiTranslate(70, -4)
 						UiColor(1,1,1,1)
-						gRegEditor.newKeyName = select(1, UiTextInput(gRegEditor.newKeyName or "", 260, 28))
+						gRegEditor.newKeyName = select(1, UiTextInput(gRegEditor.newKeyName or "", math.min(260, w-48-70-200), 28))
 					UiPop()
 					UiTranslate(0, 34)
 					UiPush()
