@@ -1,5 +1,6 @@
-#include "ui_extensions.lua"
-#include "ui_helpers.lua"
+#include "script/common.lua"
+#include "ui/ui_extensions.lua"
+#include "ui/ui_helpers.lua"
 #include "buttons.lua"
 #include "game.lua"
 
@@ -183,7 +184,7 @@ contextMenu.Collection = function(sel_collect)
 		UiColor(0.2, 0.2, 0.2, 1)
 		UiImageBox("ui/common/box-solid-6.png", w, h, 6, 6)
 		UiColor(1, 1, 1)
-		UiImageBox("ui/common/box-outline-6.png", w, h, 6, 6, 1)
+		UiImageBox("ui/common/box-outline-6.png", w, h, 6, 6)
 
 		if InputPressed("esc") or (not UiIsMouseInRect(w, h) and InputPressed("lmb")) then open = false end
 		if InputPressed("esc") or (not UiIsMouseInRect(w, h) and InputPressed("rmb")) then return false end
@@ -337,7 +338,7 @@ contextMenu.Search = function(sel_mod, fnCategory)
 		UiColor(0.2, 0.2, 0.2, 1)
 		UiImageBox("ui/common/box-solid-6.png", w, h, 6, 6)
 		UiColor(1, 1, 1)
-		UiImageBox("ui/common/box-outline-6.png", w, h, 6, 6, 1)
+		UiImageBox("ui/common/box-outline-6.png", w, h, 6, 6)
 
 		if InputPressed("esc") or (not UiIsMouseInRect(w, h) and InputPressed("lmb")) then open = false end
 		if InputPressed("esc") or (not UiIsMouseInRect(w, h) and InputPressed("rmb")) then return false end
@@ -459,7 +460,7 @@ contextMenu.Common = function(sel_mod, fnCategory)
 		UiColor(0.2, 0.2, 0.2, 1)
 		UiImageBox("ui/common/box-solid-6.png", w, h, 6, 6)
 		UiColor(1, 1, 1)
-		UiImageBox("ui/common/box-outline-6.png", w, h, 6, 6, 1)
+		UiImageBox("ui/common/box-outline-6.png", w, h, 6, 6)
 
 		if InputPressed("esc") or (not UiIsMouseInRect(w, h) and InputPressed("lmb")) then open = false end
 		if InputPressed("esc") or (not UiIsMouseInRect(w, h) and InputPressed("rmb")) then return false end
@@ -1159,16 +1160,6 @@ function updateMods()
 
 	local mods = ListKeys("mods.available")
 	local foundSelected = false
-	local displayList = {}
-	local allAuthorList = setmetatable({}, {
-		__call = function(allAuthorList, newList)
-			local offIndex = 1
-			for _, value in pairs(newList) do
-				if not allAuthorList[value] then allAuthorList[value], offIndex = #displayList+offIndex, offIndex+1 end
-			end
-		end
-	})
-	local defaultAuthorFold = GetBool(nodes.Settings..".foldauthor")
 	for i=1,#mods do
 		local mod = {}
 		local modNode = mods[i]
@@ -1176,8 +1167,6 @@ function updateMods()
 		mod.name = GetString("mods.available."..modNode..".listname")
 		mod.override = GetBool("mods.available."..modNode..".override") and not GetBool("mods.available."..modNode..".playable")
 		mod.active = GetBool("mods.available."..modNode..".active") or GetBool(modNode..".active")
-		mod.steamtime = GetInt("mods.available."..modNode..".steamtime")
-		mod.subscribetime = GetInt("mods.available."..modNode..".subscribetime")
 		mod.showbold = false
 
 		local iscontentmod = GetBool("mods.available."..modNode..".playable")
@@ -1201,16 +1190,13 @@ function updateMods()
 				local modAuthorList = strSplit(modAuthorStr, ",")
 				modAuthorList = modAuthorStr == "" and {"%,unknown,%"} or modAuthorList
 				mod.author = modAuthorList
-				allAuthorList(modAuthorList)
-				for _, value in pairs(modAuthorList) do
-					local authorIndexLookup = allAuthorList[value]
-					if tempFilterCheck[tempFilter]() then
-						displayList[authorIndexLookup] = displayList[authorIndexLookup] or {}
-						table.insert(displayList[authorIndexLookup], mod)
-						displayList[authorIndexLookup].name = value
-					end
-				end
+				if tempFilterCheck[tempFilter]() then table.insert(gMods[index].items, mod) end
 			else
+				if gMods[index].sort == 2 then
+					mod.steamtime = GetInt("mods.available."..modNode..".steamtime")
+				elseif gMods[index].sort == 3 then
+					mod.subscribetime = GetInt("mods.available."..modNode..".subscribetime")
+				end
 				if tempFilterCheck[tempFilter]() then table.insert(gMods[index].items, mod) end
 			end
 		end
@@ -1227,31 +1213,13 @@ function updateMods()
 				table.sort(gMods[i].items, function(a, b) return string.lower(a.name) < string.lower(b.name) end)
 			end
 		elseif gMods[i].sort == 1 then
-			local tempFoldList = {}
-			local authorCount = #displayList
-			local tempModSelect = gModSelected ~= ""
-			local modAuthorStr = GetString("mods.available."..gModSelected..".author")
-			modAuthorStr = modAuthorStr == "" and "%,unknown,%" or modAuthorStr
 			if gMods[i].sortInv then
-				table.sort(displayList, function(a, b) return string.lower(a.name) > string.lower(b.name) end)
-				for l=1, authorCount do
-					table.sort(displayList[l], function(a, b) return string.lower(a.name) > string.lower(b.name) end)
-					tempFoldList[l] = defaultAuthorFold
-					local foundAuthor = string.find(modAuthorStr, displayList[l].name, 1, true) and true
-					if foundAuthor then tempFoldList[l] = false end
-				end
+				table.sort(gMods[i].items, function(a, b) return string.lower((a.author[1] or "") .. a.name) > string.lower((b.author[1] or "") .. b.name) end)
 			else
-				table.sort(displayList, function(a, b) return string.lower(a.name) < string.lower(b.name) end)
-				for l=1, authorCount do
-					table.sort(displayList[l], function(a, b) return string.lower(a.name) < string.lower(b.name) end)
-					tempFoldList[l] = defaultAuthorFold
-					local foundAuthor = string.find(modAuthorStr, displayList[l].name, 1, true) and true
-					if foundAuthor then tempFoldList[l] = false end
-				end
+				table.sort(gMods[i].items, function(a, b) return string.lower((a.author[1] or "") .. a.name) < string.lower((b.author[1] or "") .. b.name) end)
 			end
-			gMods[i].items = displayList
-			gMods[i].total = authorCount
-			gMods[i].fold = tempFoldList
+			gMods[i].total = #gMods[i].items
+			gMods[i].fold = nil
 		elseif gMods[i].sort == 2 then
 			if gMods[i].sortInv then
 				table.sort(gMods[i].items, function(a, b) return a.steamtime < b.steamtime end)
@@ -3216,7 +3184,7 @@ function drawCreate()
 					selected, rmb_pushed, searchCategory = listSearchMods(gSearch, listW, h)
 					if selected ~= "" then selectMod(selected) end
 				else
-					selected, rmb_pushed = listMods(gMods[category.Index], listW, h, category.Index==2, gMods[category.Index].sort==1)
+					selected, rmb_pushed = listMods(gMods[category.Index], listW, h, category.Index==2, gMods[category.Index].fold ~= nil)
 					if selected ~= "" then selectMod(selected) end
 				end
 
@@ -4768,45 +4736,66 @@ function setWindowSize()
 end
 
 
-ModManager = {}
+ModManager = ModManager or {}
 
-ModManager.Sort = {
-	["name"] = "Name",
-	["author"] = "Author", 
-	["updated"] = "Updated",
-	["rating"] = "Rating",
-	["subscribers"] = "Subscribers",
-	["size"] = "Size",
-	["downloads"] = "Downloads"
+-- Keep these enums aligned with the current vanilla UI mod manager (ref/data/ui/components/mod_manager.lua)
+-- so other UI components (or future Teardown changes) can rely on consistent values.
+ModManager.Sort =
+{
+	Alphabetical = 1,
+	RecentUpdate = 2,
+	RecentSubscribe = 3,
+	Count = 3,
+
+	toString = function(s)
+		if ModManager.Sort.Alphabetical == s then
+			return "loc@UI_BUTTON_ALPHABETICAL"
+		elseif ModManager.Sort.RecentUpdate == s then
+			return "loc@UI_BUTTON_RECENTLY_UPDATED"
+		elseif ModManager.Sort.RecentSubscribe == s then
+			return "loc@UI_BUTTON_RECENTLY_SUBSCRIBED"
+		end
+		return "Unknown"
+	end
 }
 
-ModManager.Filter = {
-	["all"] = "All",
-	["installed"] = "Installed",
-	["subscribed"] = "Subscribed",
-	["local"] = "Local",
-	["workshop"] = "Workshop"
+ModManager.Filter =
+{
+	All = 1,
+	Global = 2,
+	Content = 3,
+	Count = 3,
+
+	toString = function(f)
+		if ModManager.Filter.All == f then
+			return "loc@UI_BUTTON_ALL"
+		elseif ModManager.Filter.Global == f then
+			return "loc@UI_BUTTON_GLOBAL"
+		elseif ModManager.Filter.Content == f then
+			return "loc@UI_BUTTON_CONTENT"
+		end
+		return "Unknown"
+	end
 }
 
-ModManager.PlayMode = {
-	["play"] = "Play",
-	["edit"] = "Edit",
-	["test"] = "Test"
+ModManager.PlayMode =
+{
+	OnePlayerLocal = 1,
+	TwoPlayerLocal = 2,
+	FourPlayerLocal = 3,
+	Count = 3,
+
+	toString = function(f)
+		if ModManager.PlayMode.OnePlayerLocal == f then
+			return "loc@UI_PLAY_OPTIONS_1PLAYER"
+		elseif ModManager.PlayMode.TwoPlayerLocal == f then
+			return "loc@UI_PLAY_OPTIONS_2PLAYERS"
+		elseif ModManager.PlayMode.FourPlayerLocal == f then
+			return "loc@UI_PLAY_OPTIONS_4PLAYERS"
+		end
+		return "Unknown"
+	end
 }
-
-ModManager.List = function()
-	-- Placeholder for mod list UI
-	return Ui.VerticalLayout {
-		Ui.Text("Mod List Placeholder")
-	}
-end
-
-ModManager.ModItem = function(mod)
-	-- Placeholder for mod item UI
-	return Ui.VerticalLayout {
-		Ui.Text(mod.name or "Unknown Mod")
-	}
-end
 
 function ModManager.OpenRegistryEditor(path)
 	gRegEditor = gRegEditor or {}
