@@ -1123,7 +1123,6 @@ function initLoc()
 
 	gBatchEnable = false
 	gBatchSelected = {}
-	gBatchScroll = 0
 
 	recentRndList = {}
 	recentRndListLookup = {}
@@ -4659,7 +4658,8 @@ function drawPopElements()
 				UiColor(1,1,1,0.85)
 				local lineH = 24
 				local maxLines = math.floor(384/lineH)
-				local startIndex = math.max(1, 1 + math.floor(-gBatchScroll))
+				local scrollY = UiGetScroll()
+				local startIndex = math.max(1, 1 + math.floor(scrollY / lineH))
 				local endIndex = math.min(#modList, startIndex + maxLines)
 				for i = startIndex, endIndex do
 					local mod = modList[i]
@@ -4689,10 +4689,6 @@ function drawPopElements()
 					UiTranslate(20, 0)
 					UiText(mod.name)
 					UiTranslate(0, lineH)
-				end
-				local wheel = InputValue("mousewheel")
-				if wheel ~= 0 then
-					gBatchScroll = math.min(0, gBatchScroll + wheel*(InputDown("shift") and 4 or 1))
 				end
 			UiPop()
 
