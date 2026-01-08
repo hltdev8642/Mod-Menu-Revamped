@@ -1122,6 +1122,7 @@ function initLoc()
 		pos = 0,
 		sortInv = false,
 		filter = 0,
+		sort = 0,
 		dragstarty = 0,
 		isdragging = false
 	}
@@ -1163,6 +1164,7 @@ end
 function resetSearchSortFilter()
 	gSearch.sortInv = false
 	gSearch.filter = 0
+	gSearch.sort = 0
 end
 
 function updateMods()
@@ -1613,6 +1615,9 @@ function updateSearch()
 		mod.name = modName
 		mod.override = GetBool(modKey..".override") and not GetBool(modKey..".playable")
 		mod.active = GetBool(modKey..".active") or GetBool(modNode..".active")
+		mod.author = GetString(modKey..".author")
+		mod.steamtime = GetInt(modKey..".steamtime")
+		mod.subscribetime = GetInt(modKey..".subscribetime")
 
 		local iscontentmod = GetBool(modKey..".playable")
 		local modPrefix = (mod.id):match("^(%w+)-")
@@ -1667,11 +1672,21 @@ function updateSearch()
 
 	for i=1, 3 do
 		gSearch.total[i] = #gSearch.items[i]
-		if gSearch.sortInv then
-			table.sort(gSearch.items[i], function(a, b) return string.lower(a.name) > string.lower(b.name) end)
-		else
-			table.sort(gSearch.items[i], function(a, b) return string.lower(a.name) < string.lower(b.name) end)
+		local sortFunc
+		if gSearch.sort == 0 then -- alphabetical
+			sortFunc = function(a, b) return string.lower(a.name) < string.lower(b.name) end
+		elseif gSearch.sort == 1 then -- author
+			sortFunc = function(a, b) return string.lower(a.author or "") < string.lower(b.author or "") end
+		elseif gSearch.sort == 2 then -- subscribed (steamtime)
+			sortFunc = function(a, b) return (a.steamtime or 0) > (b.steamtime or 0) end
+		elseif gSearch.sort == 3 then -- updated (subscribetime)
+			sortFunc = function(a, b) return (a.subscribetime or 0) > (b.subscribetime or 0) end
 		end
+		if gSearch.sortInv then
+			local origSort = sortFunc
+			sortFunc = function(a, b) return not origSort(a, b) end
+		end
+		table.sort(gSearch.items[i], sortFunc)
 	end
 end
 
@@ -2835,13 +2850,11 @@ function drawFilter(filter, sort, order, isWorkshop, isSearch)
 			UiTranslate(button1w+button2w/2+1, verticalOff)
 			UiAlign("center")
 			UiButtonImageBox("ui/common/box-solid-4.png", 4, 4, 1, 1, 1, 0.1)
-			if isWorkshop then
+			if isWorkshop or isSearch then
 				if UiTextButton(filterSortText[sort+1], button2w, buttonH) then
 					sort = (sort+1)%4
 					needUpdate = true
 				end
-			elseif isSearch then
-				UiTextButton(filterSortText[1], button2w, buttonH)
 			else
 				if UiTextButton(filterSortText[sort+1], button2w, buttonH) then
 					sort = (sort+1)%2
