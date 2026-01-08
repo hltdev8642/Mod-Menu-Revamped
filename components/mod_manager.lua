@@ -1231,13 +1231,59 @@ function updateMods()
 				table.sort(gMods[i].items, function(a, b) return string.lower(a.name) < string.lower(b.name) end)
 			end
 		elseif gMods[i].sort == 1 then
-			if gMods[i].sortInv then
-				table.sort(gMods[i].items, function(a, b) return string.lower((a.author[1] or "") .. a.name) > string.lower((b.author[1] or "") .. b.name) end)
-			else
-				table.sort(gMods[i].items, function(a, b) return string.lower((a.author[1] or "") .. a.name) < string.lower((b.author[1] or "") .. b.name) end)
+			-- Group mods by author into sectioned displayList (normalize author keys)
+			local authorIndex = {}
+			local displayList = {}
+			local offIndex = 1
+			-- Build index of unique authors (trim + lowercase)
+			for _, mod in ipairs(gMods[i].items) do
+				for _, value in ipairs(mod.author) do
+					local name = value:gsub("^%s*(.-)%s*$", "%1")
+					local key = string.lower(name)
+					if not authorIndex[key] then
+						authorIndex[key] = offIndex
+						displayList[offIndex] = { name = name }
+						offIndex = offIndex + 1
+					end
+				end
 			end
-			gMods[i].total = #gMods[i].items
-			gMods[i].fold = nil
+			-- Distribute mods into author buckets
+			for _, mod in ipairs(gMods[i].items) do
+				for _, value in ipairs(mod.author) do
+					local name = value:gsub("^%s*(.-)%s*$", "%1")
+					local key = string.lower(name)
+					local idx = authorIndex[key]
+					displayList[idx] = displayList[idx] or { name = name }
+					table.insert(displayList[idx], mod)
+				end
+			end
+			-- Sort authors and their mod lists
+			local authorCount = #displayList
+			local defaultAuthorFold = GetBool(nodes.Settings..".foldauthor")
+			local modAuthorStr = GetString("mods.available."..gModSelected..".author")
+			modAuthorStr = modAuthorStr == "" and "%,unknown,%" or modAuthorStr
+			local tempFoldList = {}
+			if gMods[i].sortInv then
+				table.sort(displayList, function(a, b) return string.lower(a.name) > string.lower(b.name) end)
+				for l=1, authorCount do
+					table.sort(displayList[l], function(a, b) return string.lower(a.name) > string.lower(b.name) end)
+					tempFoldList[l] = defaultAuthorFold
+					if string.find(modAuthorStr, displayList[l].name, 1, true) then tempFoldList[l] = false end
+				end
+			else
+				table.sort(displayList, function(a, b) return string.lower(a.name) < string.lower(b.name) end)
+				for l=1, authorCount do
+					table.sort(displayList[l], function(a, b) return string.lower(a.name) < string.lower(b.name) end)
+					tempFoldList[l] = defaultAuthorFold
+					if string.find(modAuthorStr, displayList[l].name, 1, true) then tempFoldList[l] = false end
+				end
+			end
+			-- Compute total mods across all author buckets
+			local totalMods = 0
+			for l=1, authorCount do totalMods = totalMods + (#displayList[l]) end
+			gMods[i].items = displayList
+			gMods[i].total = totalMods
+			gMods[i].fold = tempFoldList
 		elseif gMods[i].sort == 2 then
 			if gMods[i].sortInv then
 				table.sort(gMods[i].items, function(a, b) return a.steamtime < b.steamtime end)
